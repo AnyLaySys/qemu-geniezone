@@ -1,0 +1,28 @@
+---
+os:
+  name: 'OpenBSD'
+  version: '78'
+  libosinfo_id: 'http://openbsd.org/openbsd/7.8'
+
+packaging:
+  format: 'pkg'
+  command: 'pkg_add'
+
+paths:
+  bash: /usr/local/bin/bash
+  cc: /usr/bin/cc
+  ccache: /usr/local/bin/ccache
+  make: /usr/local/bin/gmake
+  ninja: /usr/local/bin/ninja
+  pip3: /usr/local/bin/pip3
+  python: /usr/local/bin/python3
+  sudoers: /etc/sudoers
+
+ansible_python_package: python3
+ansible_python_interpreter: /usr/local/bin/python3
+
+cirrus:
+  instance_type: openbsd_instance
+  image_selector: image_family
+  image_name: openbsd-7-8
+  arch: x86_64
