@@ -1,18 +1,55 @@
+# Build artifacts
 build/
-make.sh
-*.o
+/GNUmakefile
+config-host.*
+config-target.*
+config-all-devices.*
+config-all-disas.*
+trace.h
+trace-*.h
+qemu-version.h
 *.a
-*.la
-*.lo
+*.o
 *.so
 *.so.*
+*.la
+*.lo
 .deps/
 .libs/
+
+# Python
+*.pyc
+__pycache__/
+pyvenv/
+
+# Editor / IDE
+/.vscode/
+/.cache/
 *.swp
 *.swo
 *~
 .*.swp
+
+# Tags / cscope
 tags
 TAGS
 ctags
 cscope.*
+
+# User scripts
+make.sh
+
+# Submodules / ROMs / prebuilts
+roms/*
+pc-bios/*.bin
+pc-bios/*.img
+pc-bios/*.rom
+pc-bios/opensbi-*.bin
+subprojects/
+
+# Test artifacts
+tests/data/uefi-boot-images/
+tests/qemu-iotests/*.out.*
+tests/lcitool/
+scripts/oss-fuzz/
+scripts/*/__pycache__/
