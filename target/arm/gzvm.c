@@ -68,13 +68,23 @@ int gzvm_arch_get_registers(CPUState *cs, int level)
 {
     /*
      * GZVM_GET_ONE_REG is not supported by the kernel driver
-     * (returns -EOPNOTSUPP).  We cannot sync actual guest state
-     * from the hypervisor, so this is a no-op that leaves env
-     * unchanged.  The env already holds whatever we last wrote
-     * via put_registers; for a running guest this is stale but
-     * harmless — QEMU's monitor and GDB stub will still display
-     * something rather than crashing.
+     * (returns -EOPNOTSUPP).  Read from env as a best-effort
+     * fallback so 'info registers' and GDB show something
+     * rather than zeroes or crashing.
      */
+    ARMCPU *cpu = ARM_CPU(cs);
+    CPUARMState *env = &cpu->env;
+    uint64_t val;
+
+    if (gzvm_get_one_reg_sw(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val) == 0) {
+        env->pstate = val;
+    }
+    if (gzvm_get_one_reg_sw(cs, GZVM_CORE_REG(GZVM_REGS_PC), &val) == 0) {
+        env->pc = val;
+    }
+    if (gzvm_get_one_reg_sw(cs, GZVM_CORE_REG(GZVM_REGS_X(0)), &val) == 0) {
+        env->xregs[0] = val;
+    }
     return 0;
 }
 
