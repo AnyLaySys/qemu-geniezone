@@ -10,16 +10,32 @@
 #include "system/gzvm_int.h"
 #include "qapi/visitor.h"
 #include "qapi/error.h"
+#include "migration/blocker.h"
 
 bool gzvm_allowed;
+
+static Error *gzvm_migration_blocker;
 
 static int gzvm_init(AccelState *as, MachineState *ms)
 {
     int ret;
+    Error *local_err = NULL;
+
     ret = gzvm_create_vm();
     if (ret) {
         return ret;
     }
+
+    gzvm_migration_blocker = NULL;
+    error_setg(&gzvm_migration_blocker,
+               "GZVM: migration not supported (GZVM_GET_ONE_REG not implemented by kernel)");
+    ret = migrate_add_blocker(&gzvm_migration_blocker, &local_err);
+    if (ret < 0) {
+        error_report_err(local_err);
+        gzvm_migration_blocker = NULL;
+        return ret;
+    }
+
     return 0;
 }
 

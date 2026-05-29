@@ -113,7 +113,7 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
                 .flags = 0,
                 .guest_phys_addr = slot->start,
                 .memory_size = 0,
-                .userspace_addr = 0,
+                .userspace_addr = (__u64)(uintptr_t)slot->mem,
             };
             gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
             slot->size = 0;
@@ -124,7 +124,6 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
         return;
     }
 
-    
     if (!memory_region_is_ram(area) &&
         !memory_region_is_rom(area) &&
         !memory_region_is_romd(area)) {
@@ -145,7 +144,7 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
             .flags = 0,
             .guest_phys_addr = slot->start,
             .memory_size = 0,
-            .userspace_addr = 0,
+            .userspace_addr = (__u64)(uintptr_t)slot->mem,
         };
         gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
         slot->size = 0;
@@ -186,7 +185,6 @@ static MemoryListener gzvm_memory_listener = {
 int gzvm_create_vm(void)
 {
     GZVMState *s;
-    int i;
     int ret;
 
     s = GZVM_STATE(current_accel());
@@ -205,10 +203,43 @@ int gzvm_create_vm(void)
     }
     s->vmfd = ret;
 
+    {
+        uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
+        int ipa_bits = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
+        if (ipa_bits > 0) {
+            error_report("gzvm    │IPA size: %d bits", ipa_bits);
+        } else {
+            error_report("gzvm    │IPA size probe failed, assuming 40 bits");
+            ipa_bits = 40;
+        }
+    }
+
+    /* Probe capabilities for diagnostics */
+    {
+        static const struct {
+            uint64_t cap;
+            const char *name;
+        } cap_list[] = {
+            { GZVM_CAP_ARM_PROTECTED_VM,     "PROTECTED_VM" },
+            { GZVM_CAP_ENABLE_IDLE,          "ENABLE_IDLE" },
+            { GZVM_CAP_BLOCK_BASED_DEMAND_PAGING, "BLOCK_DEMAND_PAGING" },
+            { GZVM_CAP_ENABLE_DEMAND_PAGING, "DEMAND_PAGING" },
+            { GZVM_CAP_QUERY_HYP_BATCH_PAGES, "HYP_BATCH_PAGES" },
+            { GZVM_CAP_QUERY_DESTROY_BATCH_PAGES, "DESTROY_BATCH_PAGES" },
+        };
+        for (int i = 0; i < (int)ARRAY_SIZE(cap_list); i++) {
+            uint64_t c = cap_list[i].cap;
+            int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &c);
+            if (r > 0) {
+                error_report("gzvm    │cap %s = %d", cap_list[i].name, r);
+            }
+        }
+    }
+
     qemu_mutex_init(&s->slots_lock);
     s->free_slots = NULL;
     s->nr_slots = GZVM_MAX_MEM_SLOTS;
-    for (i = 0; i < s->nr_slots; ++i) {
+    for (int i = 0; i < s->nr_slots; ++i) {
         s->slots[i].start = 0;
         s->slots[i].size = 0;
         s->slots[i].id = i;

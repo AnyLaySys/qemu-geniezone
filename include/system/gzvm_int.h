@@ -15,7 +15,7 @@ typedef struct gzvm_slot {
     uint32_t flags;
 } gzvm_slot;
 
-#define GZVM_MAX_MEM_SLOTS    10
+#define GZVM_MAX_MEM_SLOTS    512
 
 struct GZVMState {
     AccelState parent_obj;
@@ -39,6 +39,10 @@ struct GZVCPUState {
     struct gzvm_vcpu_run *run;
     uint64_t last_fault_addr;
     int same_fault_count;
+    uint64_t last_mmio_addr;
+    uint64_t last_mmio_data;
+    uint8_t last_mmio_size;
+    uint8_t last_mmio_valid;
 };
 
 #define GZVCPU(cpu) ((struct GZVCPUState *)(cpu)->accel)
@@ -50,6 +54,7 @@ int gzvm_vcpu_ioctl(CPUState *cpu, int type, ...);
 void *gzvm_cpu_thread_fn(void *arg);
 int gzvm_add_irqfd(int irqfd, int gsi, bool resample, Error **errp);
 int gzvm_arch_put_registers(CPUState *cs, int level);
+int gzvm_arch_get_registers(CPUState *cs, int level);
 void gzvm_cpu_synchronize_post_reset(CPUState *cpu);
 gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr);
 
