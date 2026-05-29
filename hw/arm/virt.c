@@ -219,7 +219,7 @@ static const MemMapEntry base_memmap[] = {
     [VIRT_PCIE_PIO] =           { 0x3eff0000, 0x00010000 },
     [VIRT_PCIE_ECAM] =          { 0x3f000000, 0x01000000 },
     /* Actual RAM size depends on initial RAM and device memory settings */
-    [VIRT_MEM] =                { GiB, LEGACY_RAMLIMIT_BYTES },
+    [VIRT_MEM] =                { 2 * GiB, LEGACY_RAMLIMIT_BYTES },
 };
 
 /* Update the docs for highmem-mmio-size when changing this default */
@@ -3119,6 +3119,9 @@ static void machvirt_init(MachineState *machine)
 
     memory_region_add_subregion(sysmem, vms->memmap[VIRT_MEM].base,
                                 machine->ram);
+    if (gzvm_enabled()) {
+        gzvm_set_ram_base(vms->memmap[VIRT_MEM].base);
+    }
 
     cxl_fmws_update_mmio();
 

@@ -135,6 +135,11 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
         return;
     }
 
+    /* Match crosvm: only register main RAM, skip low firmware/secure regions */
+    if (section->offset_within_address_space < s->ram_base) {
+        return;
+    }
+
     gzvm_slots_lock(s);
     slot = gzvm_find_overlap_slot(s, section->offset_within_address_space,
                                    int128_get64(section->size));
@@ -152,7 +157,14 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
                                        GUINT_TO_POINTER(slot->id));
     }
 
-    if (area->readonly || area->rom_device) {
+    /*
+     * Only mark readonly/rom regions as PROTECT_FW when running as a
+     * protected VM.  For non-protected VMs use GUEST_MEM for everything,
+     * matching crosvm's GenieZone backend which never passes PROTECT_FW
+     * to the hypervisor unless runs_firmware() returns true (pVM path).
+     * The hypervisor may reject PROTECT_FW regions in non-pVM mode.
+     */
+    if (s->protected_vm && (area->readonly || area->rom_device)) {
         flags = GZVM_USER_MEM_REGION_PROTECT_FW;
     }
 

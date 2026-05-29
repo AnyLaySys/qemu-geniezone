@@ -44,6 +44,12 @@ void gzvm_set_gic_bases(uint64_t dist_base, uint64_t redist_base,
     state->gic_redist_size = redist_size;
 }
 
+void gzvm_set_ram_base(uint64_t base)
+{
+    GZVMState *state = GZVM_STATE(current_accel());
+    state->ram_base = base;
+}
+
 static int gzvm_get_one_reg_sw(CPUState *cs, uint64_t id, void *target)
 {
     ARMCPU *cpu = ARM_CPU(cs);
@@ -96,20 +102,17 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     int ret;
 
     /*
-     * Secondary VCPUs: set NOTHING.  crosvm leaves them in the
-     * hypervisor's default powered-off state.  PSCI CPU_ON in the
-     * hypervisor sets PSTATE, PC, and X0 from the CPU_ON args.
-     */
-    if (cs->cpu_index != 0)
-        return 0;
-
-    /*
-     * 1. PSTATE = DAIF masked | EL1h
+     * 1. PSTATE = DAIF masked | EL1h for ALL VCPUs.
      *
      * GenieZone hypervisor owns EL2, so the guest must run at EL1h
      * (not EL2h which QEMU's arm_emulate_firmware_reset would set).
      * This matches crosvm's PSR_D_BIT | PSR_A_BIT | PSR_I_BIT |
      * PSR_F_BIT | PSR_MODE_EL1H = 0x3C5.
+     *
+     * crosvm aarch64/src/lib.rs line 1471 sets PSTATE unconditionally
+     * for every VCPU (including non-boot), then only sets PC/X0 for
+     * the boot CPU.  Non-boot VCPUs start powered-off and the
+     * hypervisor sets their PC/X0 from PSCI CPU_ON args.
      */
     val = PSTATE_DAIF | PSTATE_MODE_EL1h;
     ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
@@ -118,20 +121,22 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
         return ret;
     }
 
-    /* 2. PC = kernel entry (boot.c sets env->pc = info->entry when gzvm) */
-    val = env->pc;
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &val);
-    if (ret) {
-        error_report("gzvm    │put_registers: pc failed (errno=%d)", errno);
-        return ret;
-    }
+    if (cs->cpu_index == 0) {
+        /* 2. PC = kernel entry (boot.c sets env->pc = info->entry) */
+        val = env->pc;
+        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &val);
+        if (ret) {
+            error_report("gzvm    │put_registers: pc failed (errno=%d)", errno);
+            return ret;
+        }
 
-    /* 3. X0 = DTB address (boot.c sets env->xregs[0] = info->dtb_start) */
-    val = env->xregs[0];
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(0)), &val);
-    if (ret) {
-        error_report("gzvm    │put_registers: x0 failed (errno=%d)", errno);
-        return ret;
+        /* 3. X0 = DTB address (boot.c sets env->xregs[0] = info->dtb_start) */
+        val = env->xregs[0];
+        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(0)), &val);
+        if (ret) {
+            error_report("gzvm    │put_registers: x0 failed (errno=%d)", errno);
+            return ret;
+        }
     }
 
     /* No FPSIMD, no SPSR, no ELR_EL1, no sysreg writes — matches crosvm */
