@@ -18,6 +18,13 @@ static int gzvm_handle_system_event(CPUState *cpu, struct gzvm_vcpu_run *run)
     case GZVM_SYSTEM_EVENT_CRASH:
         qemu_system_guest_panicked(cpu_get_crash_info(cpu));
         return 0;
+    case GZVM_SYSTEM_EVENT_WAKEUP:
+        /*
+         * Hypervisor waking a previously powered-down VCPU (PSCI CPU_ON).
+         * Clear halted so the VCPU thread re-enters GZVM_RUN.
+         */
+        cpu->halted = 0;
+        return EXCP_INTERRUPT;
     default:
         return 0;
     }

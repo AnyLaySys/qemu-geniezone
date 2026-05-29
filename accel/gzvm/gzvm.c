@@ -47,6 +47,7 @@ static int gzvm_init_vcpu(CPUState *cpu)
 
     vcpu->fd = ret;
     vcpu->run = g_new0(struct gzvm_vcpu_run, 1);
+    vcpu->last_mmio_valid = 0;
     cpu->accel = (AccelCPUState *)vcpu;
     return 0;
 }
@@ -75,30 +76,49 @@ static int gzvm_cpu_exec(CPUState *cpu)
         run->exit_reason = gzvm_detect_exit_reason(run);
     }
 
+    if (run->exit_reason != GZVM_EXIT_MMIO) {
+        GZVCPU(cpu)->last_mmio_valid = 0;
+    }
+
     switch (run->exit_reason) {
-    case GZVM_EXIT_MMIO:
-        return gzvm_handle_mmio_exit(cpu, run);
+    case GZVM_EXIT_MMIO: {
+        struct GZVCPUState *vcpu = GZVCPU(cpu);
+        if (run->mmio.is_write &&
+            vcpu->last_mmio_valid &&
+            vcpu->last_mmio_addr == run->mmio.phys_addr &&
+            vcpu->last_mmio_size == run->mmio.size &&
+            !memcmp(&vcpu->last_mmio_data, run->mmio.data, run->mmio.size)) {
+            return 0;
+        }
+        int mmio_ret = gzvm_handle_mmio_exit(cpu, run);
+        if (run->mmio.is_write && mmio_ret == 0) {
+            vcpu->last_mmio_valid = 1;
+            vcpu->last_mmio_addr = run->mmio.phys_addr;
+            vcpu->last_mmio_size = run->mmio.size;
+            memcpy(&vcpu->last_mmio_data, run->mmio.data, run->mmio.size);
+        }
+        return mmio_ret;
+    }
     case GZVM_EXIT_SYSTEM_EVENT:
-        fprintf(stderr, "gzvm SYSTEM_EVENT type=%d\n", run->system_event.type);
         return gzvm_handle_system_event(cpu, run);
     case GZVM_EXIT_FAIL_ENTRY:
         return gzvm_handle_fail_entry(cpu, run);
     case GZVM_EXIT_INTERNAL_ERROR:
         return gzvm_handle_internal_error(cpu, run);
     case GZVM_EXIT_IDLE:
-        fprintf(stderr, "gzvm IDLE\n");
+        /*
+         * Guest WFI or VCPU powered off.  Sleep briefly to avoid
+         * busy-waiting when secondary VCPUs are idle / powered off.
+         */
+        g_usleep(100);
         return EXCP_INTERRUPT;
     case GZVM_EXIT_IRQ:
-        fprintf(stderr, "gzvm IRQ\n");
         return EXCP_INTERRUPT;
     case GZVM_EXIT_HYPERCALL:
-        fprintf(stderr, "gzvm HYPERCALL\n");
         return 0;
     case GZVM_EXIT_GZ:
-        fprintf(stderr, "gzvm GZ\n");
         return EXCP_INTERRUPT;
     case GZVM_EXIT_IPI:
-        fprintf(stderr, "gzvm IPI\n");
         return EXCP_INTERRUPT;
     case 0:
         return 0;
