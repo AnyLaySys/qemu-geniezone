@@ -249,6 +249,51 @@ int gzvm_create_vm(void)
     memory_listener_register(&gzvm_memory_listener, &address_space_memory);
     memory_listener_register(&gzvm_ioeventfd_listener, &address_space_memory);
 
+    /*
+     * Create VGICv3 DIST before any VCPUs, so the kernel driver's
+     * gzvm_vgic_create() sets vgic.in_kernel = true.
+     * Kernel driver hardcodes DIST base to 0x08000000 internally,
+     * so we don't need the final GIC base address yet.
+     */
+    {
+        struct gzvm_create_device dist_dev = {
+            .dev_type = GZVM_DEV_TYPE_ARM_VGIC_V3_DIST,
+            .dev_addr = 0x08000000ULL,
+            .dev_reg_size = 0x10000,
+        };
+        ret = gzvm_vm_ioctl(GZVM_CREATE_DEVICE, &dist_dev);
+        if (ret) {
+            error_report("gzvm    │GZVM_CREATE_DEVICE VGIC_DIST failed early: %s (errno=%d)",
+                         strerror(errno), errno);
+        } else {
+            error_report("gzvm    │VGICv3 DIST created early at 0x8000000");
+            s->gic_dist_base = 0x08000000ULL;
+        }
+    }
+
+    /*
+     * REDIST must also be created before VCPUs, matching crosvm's order:
+     * create both DIST and REDIST first, then VCPUs.
+     * Kernel driver ignores dev_addr/dev_reg_size for REDIST (hardcoded
+     * internally to base=0x080A0000, count=0/unlimited), but we pass
+     * reasonable values for forward compatibility.
+     */
+    {
+        struct gzvm_create_device redist_dev = {
+            .dev_type = GZVM_DEV_TYPE_ARM_VGIC_V3_REDIST,
+            .dev_addr = 0x080A0000ULL,
+            .dev_reg_size = 0x20000ULL,
+        };
+        ret = gzvm_vm_ioctl(GZVM_CREATE_DEVICE, &redist_dev);
+        if (ret) {
+            error_report("gzvm    │GZVM_CREATE_DEVICE VGIC_REDIST failed early: %s (errno=%d)",
+                         strerror(errno), errno);
+        } else {
+            error_report("gzvm    │VGICv3 REDIST created early at 0x80A0000");
+            s->gic_redist_base = 0x080A0000ULL;
+        }
+    }
+
     error_report("gzvm    │gzvm_create_vm: VM fd=%d memory listener registered", s->vmfd);
     return 0;
 }

@@ -115,11 +115,23 @@ static int gzvm_cpu_exec(CPUState *cpu)
     case GZVM_EXIT_IRQ:
         return EXCP_INTERRUPT;
     case GZVM_EXIT_HYPERCALL:
-        return 0;
+        /* Hypervisor handles PSCI in-kernel; other hypercalls
+         * (PTP, mem_relinquish) are handled in-kernel too.
+         * Return to guest immediately.
+         */
+        return EXCP_INTERRUPT;
     case GZVM_EXIT_GZ:
         return EXCP_INTERRUPT;
     case GZVM_EXIT_IPI:
         return EXCP_INTERRUPT;
+    case GZVM_EXIT_SHUTDOWN:
+        /* Guest PSCI CPU_OFF or shutdown: park this VCPU.
+         * The hypervisor will wake it on PSCI CPU_ON.
+         */
+        g_usleep(100);
+        return EXCP_INTERRUPT;
+    case GZVM_EXIT_EXCEPTION:
+        return -1;
     case 0:
         return 0;
     default:

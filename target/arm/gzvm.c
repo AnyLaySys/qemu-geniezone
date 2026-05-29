@@ -96,13 +96,12 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     int ret;
 
     /*
-     * Match crosvm's GenieZone backend: only write the 3 registers
-     * the hypervisor needs.  Writing extra registers (FPSIMD, SPSR,
-     * ELR_EL1, system registers) causes GZVM_EXIT_INTERNAL_ERROR.
-     *
-     * For secondary VCPUs, only PSTATE is needed; the hypervisor
-     * powers them off and PSCI CPU_ON restores the rest.
+     * Secondary VCPUs: set NOTHING.  crosvm leaves them in the
+     * hypervisor's default powered-off state.  PSCI CPU_ON in the
+     * hypervisor sets PSTATE, PC, and X0 from the CPU_ON args.
      */
+    if (cs->cpu_index != 0)
+        return 0;
 
     /*
      * 1. PSTATE = DAIF masked | EL1h
@@ -117,11 +116,6 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     if (ret) {
         error_report("gzvm    │put_registers: pstate failed (errno=%d)", errno);
         return ret;
-    }
-
-    if (cs->cpu_index != 0) {
-        /* Secondary VCPU: hypervisor powers it off; PSCI sets the rest. */
-        return 0;
     }
 
     /* 2. PC = kernel entry (boot.c sets env->pc = info->entry when gzvm) */
