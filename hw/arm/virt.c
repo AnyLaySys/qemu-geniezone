@@ -2920,7 +2920,12 @@ static void machvirt_init(MachineState *machine)
     if (vms->secure && firmware_loaded) {
         vms->psci_conduit = QEMU_PSCI_CONDUIT_DISABLED;
     } else if (vms->virt) {
-        vms->psci_conduit = QEMU_PSCI_CONDUIT_SMC;
+        if (gzvm_enabled()) {
+            /* GenieZone hypervisor only supports HVC conduit */
+            vms->psci_conduit = QEMU_PSCI_CONDUIT_HVC;
+        } else {
+            vms->psci_conduit = QEMU_PSCI_CONDUIT_SMC;
+        }
     } else {
         vms->psci_conduit = QEMU_PSCI_CONDUIT_HVC;
     }
@@ -3120,6 +3125,11 @@ static void machvirt_init(MachineState *machine)
     virt_flash_fdt(vms, sysmem, secure_sysmem ?: sysmem);
 
     create_gic(vms, sysmem);
+    if (gzvm_enabled()) {
+        gzvm_set_gic_bases(vms->memmap[VIRT_GIC_DIST].base,
+                           vms->memmap[VIRT_GIC_REDIST].base,
+                           vms->memmap[VIRT_GIC_REDIST].size);
+    }
     create_msi_controller(vms);
 
     virt_post_cpus_gic_realized(vms, sysmem);
