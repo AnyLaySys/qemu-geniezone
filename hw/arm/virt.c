@@ -2904,6 +2904,9 @@ static void machvirt_init(MachineState *machine)
         memory_region_add_subregion_overlap(secure_sysmem, 0, sysmem, -1);
     }
 
+    if (gzvm_enabled()) {
+        gzvm_set_ram_base(vms->memmap[VIRT_MEM].base);
+    }
     firmware_loaded = virt_firmware_init(vms, sysmem,
                                          secure_sysmem ?: sysmem);
 
@@ -3119,9 +3122,6 @@ static void machvirt_init(MachineState *machine)
 
     memory_region_add_subregion(sysmem, vms->memmap[VIRT_MEM].base,
                                 machine->ram);
-    if (gzvm_enabled()) {
-        gzvm_set_ram_base(vms->memmap[VIRT_MEM].base);
-    }
 
     cxl_fmws_update_mmio();
 
