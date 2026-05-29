@@ -217,12 +217,11 @@ int gzvm_create_vm(void)
 
     {
         uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
-        int ipa_bits = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
-        if (ipa_bits > 0) {
-            error_report("gzvm    │IPA size: %d bits", ipa_bits);
+        int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
+        if (r == 0) {
+            error_report("gzvm    │IPA size: %d bits", (int)cap);
         } else {
             error_report("gzvm    │IPA size probe failed, assuming 40 bits");
-            ipa_bits = 40;
         }
     }
 
@@ -242,8 +241,8 @@ int gzvm_create_vm(void)
         for (int i = 0; i < (int)ARRAY_SIZE(cap_list); i++) {
             uint64_t c = cap_list[i].cap;
             int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &c);
-            if (r > 0) {
-                error_report("gzvm    │cap %s = %d", cap_list[i].name, r);
+            if (r == 0) {
+                error_report("gzvm    │cap %s = %" PRIu64, cap_list[i].name, c);
             }
         }
     }
