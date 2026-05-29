@@ -8,17 +8,7 @@ void gzvm_start_vm(void)
                  (unsigned long long)s->gic_dist_base,
                  (unsigned long long)s->gic_redist_base);
 
-    {
-        struct gzvm_enable_cap cap = {
-            .cap = GZVM_CAP_ENABLE_IDLE,
-        };
-        ret = gzvm_vm_ioctl(GZVM_ENABLE_CAP, &cap);
-        if (ret) {
-            error_report("gzvm    │GZVM_CAP_ENABLE_IDLE not supported (ret=%d)", ret);
-        } else {
-            error_report("gzvm    │GZVM_CAP_ENABLE_IDLE enabled");
-        }
-    }
+    error_report("gzvm    │GZVM_CAP_ENABLE_IDLE skipped (crosvm doesn't use it)");
 
     if (s->protected_vm) {
         struct gzvm_enable_cap cap = {
