@@ -24,7 +24,7 @@ jobs:
       run: |
         mkdir -p ../qemu-geniezone/build/sysroot
         wget https://raw.githubusercontent.com/AnyLaySys/qemu-gunyah-build/main/1.sh
-        1.sh
+        ./1.sh
     - name: 配置环境
       run: |
         set -e
