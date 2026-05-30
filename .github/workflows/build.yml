@@ -14,16 +14,55 @@ jobs:
     - name: 安装依赖
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential ninja-build libglib2.0-dev libpixman-1-dev
+        sudo apt-get install -y build-essential ninja-build pkg-config
+    - name: 配置 Android NDK
+      run: |
+        wget https://dl.google.com/android/repository/android-ndk-r30-beta1-linux.zip -O ndk.zip
+        unzip -q ndk.zip -d $HOME
+        rm ndk.zip
+    - name: 配置 sysroot
+      run: |
+        mkdir -p ../qemu-geniezone/build/sysroot
+        wget https://raw.githubusercontent.com/AnyLaySys/qemu-gunyah-build/main/1.sh
+        1.sh
     - name: 配置环境
-      run: ./configure --target-list=aarch64-softmmu --disable-hvf --disable-nitro --disable-whpx --disable-xen --disable-docs --disable-vde --disable-opengl --disable-vhost-user --disable-vhost-vdpa --disable-vduse
+      run: |
+        set -e
+        NdkPath="$HOME/android-ndk-r30-beta1"
+        Sysroot="$(realpath ~/qemu-geniezone/build/sysroot)"
+        Toolchain="$NdkPath/toolchains/llvm/prebuilt/linux-x86_64"
+        ApiLevel=35
+        env PATH="$Toolchain/bin:$Sysroot/bin:$PATH" PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR="$Sysroot/lib/pkgconfig" PKG_CONFIG_PATH="$Sysroot/lib/pkgconfig" LDFLAGS="-L$Sysroot/lib -Wl,-rpath-link,$Sysroot/lib" AR="$Toolchain/bin/llvm-ar" NM="$Toolchain/bin/llvm-nm" OBJCOPY="$Toolchain/bin/llvm-objcopy" RANLIB="$Toolchain/bin/llvm-ranlib" STRIP="$Toolchain/bin/llvm-strip" ./configure --target-list=aarch64-softmmu --enable-gzvm --disable-gio --disable-werror --disable-docs --disable-tools --disable-guest-agent --disable-opengl --disable-virglrenderer --disable-vhost-user --disable-vhost-user-blk-server --disable-vhost-vdpa --disable-vhost-kernel --disable-vhost-net --disable-vhost-crypto --disable-libvduse --disable-vduse-blk-export --disable-virtfs --disable-multiprocess --disable-dbus-display --disable-qemu-vnc --disable-vnc --disable-tpm --disable-usb-redir --cpu=aarch64 --cross-prefix=aarch64-linux-android- --cc="$Toolchain/bin/aarch64-linux-android${ApiLevel}-clang" --cxx="$Toolchain/bin/aarch64-linux-android${ApiLevel}-clang++" --with-coroutine=sigaltstack --extra-cflags="-I$Sysroot/include"
     - name: 开始编译
-      run: make -j$(nproc)
+      run: |
+        set -e
+        NdkPath="$HOME/android-ndk-r30-beta1"
+        Sysroot="$(realpath ~/qemu-geniezone/build/sysroot)"
+        Toolchain="$NdkPath/toolchains/llvm/prebuilt/linux-x86_64"
+        env PATH="$Toolchain/bin:$Sysroot/bin:$PATH" PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR="$Sysroot/lib/pkgconfig" PKG_CONFIG_PATH="$Sysroot/lib/pkgconfig" LDFLAGS="-L$Sysroot/lib -Wl,-rpath-link,$Sysroot/lib" ninja -C build -j$(nproc) qemu-system-aarch64
+    - name: 开始打包
+      run: |
+        set -e
+        NdkPath="$HOME/android-ndk-r30-beta1"
+        Sysroot="$(realpath ~/qemu-geniezone/build/sysroot)"
+        QvmDir="qvm"
+        Toolchain="$NdkPath/toolchains/llvm/prebuilt/linux-x86_64"
+        ApiLevel=35
+        mkdir -p "$QvmDir/pc-bios/keymaps"
+        cp "build/qemu-system-aarch64" "$QvmDir/qemu-system-aarch64"
+        cp -L "$Sysroot/lib/libpixman-1.so" "$QvmDir/libpixman-1.so" || true
+        cp -L "$Sysroot/lib/libusb-1.0.so" "$QvmDir/libusb-1.0.so" || true
+        cp -L "$Sysroot/lib/libglib-2.0.so.0" "$QvmDir/libglib-2.0.so.0" || true
+        cp -L "$Sysroot/lib/libgmodule-2.0.so.0" "$QvmDir/libgmodule-2.0.so.0" || true
+        cp -L "$Sysroot/lib/libintl.so.8" "$QvmDir/libintl.so.8" || true
+        cp -L "$Sysroot/lib/libpcre2-8.so" "$QvmDir/libpcre2-8.so" || true
+        cp -L "$Toolchain/sysroot/usr/lib/aarch64-linux-android/$ApiLevel/libz.so" "$QvmDir/libz.so"
+        cp "pc-bios/keymaps/en-us" "$QvmDir/pc-bios/keymaps/en-us"
+        cp "pc-bios/efi-virtio.rom" "$QvmDir/pc-bios/efi-virtio.rom"
+        "$Toolchain/bin/llvm-strip" --strip-all "$QvmDir/qemu-system-aarch64" "$QvmDir"/*.so
     - name: 上传产物
       uses: actions/upload-artifact@v4
       with:
-        name: qemu-system-aarch64-bin
-        path: |
-          build/qemu-system-aarch64
-          build/aarch64-softmmu/qemu-system-aarch64
+        name: qemu-system-aarch64
+        path: qvm/
         if-no-files-found: error
