@@ -30,11 +30,10 @@ jobs:
     - name: 开始编译
       run: |
         set -e
+        cd qemu-geniezone/build/src/qemu-geniezone-main
         NdkPath="$HOME/android-ndk-r30-beta1"
-        Sysroot="$(realpath build/sysroot)"
-        Toolchain="$NdkPath/toolchains/llvm/prebuilt/linux-x86_64"
-        ApiLevel=35
-        env PATH="$Toolchain/bin:$Sysroot/bin:$PATH" PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR="$Sysroot/lib/pkgconfig" PKG_CONFIG_PATH="$Sysroot/lib/pkgconfig" LDFLAGS="-L$Sysroot/lib -Wl,-rpath-link,$Sysroot/lib" AR="$Toolchain/bin/llvm-ar" NM="$Toolchain/bin/llvm-nm" OBJCOPY="$Toolchain/bin/llvm-objcopy" RANLIB="$Toolchain/bin/llvm-ranlib" STRIP="$Toolchain/bin/llvm-strip" build/src/qemu-geniezone-main/configure --target-list=aarch64-softmmu --enable-gzvm --disable-gio --disable-werror --disable-docs --disable-tools --disable-guest-agent --disable-opengl --disable-virglrenderer --disable-vhost-user --disable-vhost-user-blk-server --disable-vhost-vdpa --disable-vhost-kernel --disable-vhost-net --disable-vhost-crypto --disable-libvduse --disable-vduse-blk-export --disable-virtfs --disable-multiprocess --disable-dbus-display --disable-qemu-vnc --disable-vnc --disable-tpm --disable-usb-redir --cpu=aarch64 --cross-prefix=aarch64-linux-android- --cc="$Toolchain/bin/aarch64-linux-android${ApiLevel}-clang" --cxx="$Toolchain/bin/aarch64-linux-android${ApiLevel}-clang++" --with-coroutine=sigaltstack --extra-cflags="-I$Sysroot/include" && ninja -C build -j$(nproc) qemu-system-aarch64
+        Sysroot="$(realpath ../../../sysroot)"
+        env PATH="$Toolchain/bin:$Sysroot/bin:$PATH" PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR="$Sysroot/lib/pkgconfig" PKG_CONFIG_PATH="$Sysroot/lib/pkgconfig" LDFLAGS="-L$Sysroot/lib -Wl,-rpath-link,$Sysroot/lib" AR="$Toolchain/bin/llvm-ar" NM="$Toolchain/bin/llvm-nm" OBJCOPY="$Toolchain/bin/llvm-objcopy" RANLIB="$Toolchain/bin/llvm-ranlib" STRIP="$Toolchain/bin/llvm-strip" build/src/qemu-geniezone-main/configure --target-list=aarch64-softmmu --enable-gzvm --disable-gio --disable-werror --disable-docs --disable-tools --disable-guest-agent --disable-opengl --disable-virglrenderer --disable-vhost-user --disable-vhost-user-blk-server --disable-vhost-vdpa --disable-vhost-kernel --disable-vhost-net --disable-vhost-crypto --disable-libvduse --disable-vduse-blk-export --disable-virtfs --disable-multiprocess --disable-dbus-display --disable-qemu-vnc --disable-vnc --disable-tpm --disable-usb-redir --cpu=aarch64 --cross-prefix=aarch64-linux-android- --cc="$Toolchain/bin/aarch64-linux-android${ApiLevel}-clang" --cxx="$Toolchain/bin/aarch64-linux-android${ApiLevel}-clang++" --with-coroutine=sigaltstack --extra-cflags="-I$Sysroot/include" && ninja -C build -j$(nproc) qemu-system-aarch64 && cd
     - name: 开始打包
       run: |
         set -e
