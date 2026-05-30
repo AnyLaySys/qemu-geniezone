@@ -1,0 +1,29 @@
+name: QEMU GenieZone 构建
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 拉取代码
+      uses: actions/checkout@v4
+    - name: 安装依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential ninja-build libglib2.0-dev pixman-1-dev
+    - name: 配置环境
+      run: ./configure --target-list=aarch64-softmmu --disable-hvf --disable-nitro --disable-whpx --disable-xen --disable-docs --disable-vde --disable-opengl
+    - name: 开始编译
+      run: make -j$(nproc)
+    - name: 上传产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: qemu-system-aarch64-bin
+        path: |
+          build/qemu-system-aarch64
+          build/aarch64-softmmu/qemu-system-aarch64
+        if-no-files-found: error
