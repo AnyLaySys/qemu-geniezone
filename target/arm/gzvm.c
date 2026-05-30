@@ -17,6 +17,10 @@
 #define GZVM_REGS_X(i)      ((i) * 8)
 #define GZVM_REGS_PC        (32 * 8)
 #define GZVM_REGS_PSTATE    (33 * 8)
+/* Additional registers within struct gzvm_regs (crosvm bindings) */
+#define GZVM_REGS_SP_EL1    (34 * 8)  /* offsetof(gzvm_regs, sp_el1)  = 272 */
+#define GZVM_REGS_ELR_EL1   (35 * 8)  /* offsetof(gzvm_regs, elr_el1) = 280 */
+#define GZVM_REGS_SPSR_EL1  (36 * 8)  /* offsetof(gzvm_regs, spsr[0]) = 288 */
 
 static int gzvm_set_one_reg(CPUState *cs, uint64_t id, void *source)
 {
@@ -139,7 +143,39 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
         }
     }
 
-    /* No FPSIMD, no SPSR, no ELR_EL1, no sysreg writes — matches crosvm */
+    /* No FPSIMD, no sysreg writes — matches crosvm for GZVM_SET_ONE_REG path */
+
+    /*
+     * Set system registers that the hypervisor may check: ELR_EL1 (return
+     * address for ERET), SPSR_EL1 (PSTATE restore), and SP_EL1 (stack ptr).
+     * Even though crosvm doesn't set these explicitly (the hypervisor
+     * initialises them from the VCPU context), QEMU's CPU reset may leave
+     * stale values that confuse the hypervisor's entry check.
+     */
+    if (cs->cpu_index == 0) {
+        val = env->pc;
+        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_ELR_EL1), &val);
+        if (ret) {
+            error_report("gzvm    │put_registers: elr_el1 failed (errno=%d)", errno);
+            return ret;
+        }
+
+        val = PSTATE_DAIF | PSTATE_MODE_EL1h;
+        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SPSR_EL1), &val);
+        if (ret) {
+            error_report("gzvm    │put_registers: spsr_el1 failed (errno=%d)", errno);
+            return ret;
+        }
+
+        /* SP_EL1 = top of RAM (safe default stack) */
+        val = 0x88000000ULL;
+        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP_EL1), &val);
+        if (ret) {
+            error_report("gzvm    │put_registers: sp_el1 failed (errno=%d)", errno);
+            return ret;
+        }
+    }
+
     return 0;
 }
 
