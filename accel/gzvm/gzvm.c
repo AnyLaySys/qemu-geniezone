@@ -124,10 +124,18 @@ static int gzvm_cpu_exec(CPUState *cpu)
         return EXCP_INTERRUPT;
     case GZVM_EXIT_IPI:
         return EXCP_INTERRUPT;
+    case GZVM_EXIT_DEBUG:
+        return EXCP_DEBUG;
     case GZVM_EXIT_SHUTDOWN:
-        /* Guest PSCI CPU_OFF or shutdown: park this VCPU.
-         * The hypervisor will wake it on PSCI CPU_ON.
-         */
+        if (cpu->cpu_index == 0) {
+            /*
+             * CPU0 power-off likely means PSCI SYSTEM_OFF (system shutdown).
+             * Trigger shutdown so QEMU exits cleanly.  Secondary VCPUs
+             * get EXIT_SHUTDOWN for PSCI CPU_OFF and just wait for wakeup.
+             */
+            qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
+            return EXCP_INTERRUPT;
+        }
         g_usleep(100);
         return EXCP_INTERRUPT;
     case GZVM_EXIT_EXCEPTION:
@@ -184,7 +192,9 @@ void *gzvm_cpu_thread_fn(void *arg)
 
         if (cpu_can_run(cpu)) {
             ret = gzvm_cpu_exec(cpu);
-            if (ret < 0) {
+            if (ret == EXCP_DEBUG) {
+                cpu_handle_guest_debug(cpu);
+            } else if (ret < 0) {
                 cpu_dump_state(cpu, stderr, CPU_DUMP_CODE);
                 vm_stop(RUN_STATE_INTERNAL_ERROR);
             }
