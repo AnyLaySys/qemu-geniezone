@@ -13,14 +13,28 @@
 
 #define GZVM_CORE_REG(offset)  (GZVM_REG_ARM64 | GZVM_REG_SIZE_U64 | \
                                 GZVM_REG_ARM_CORE | ((offset) / 4))
+#define GZVM_CORE_REG32(offset) (GZVM_REG_ARM64 | GZVM_REG_SIZE_U32 | \
+                                 GZVM_REG_ARM_CORE | ((offset) / 4))
+#define GZVM_CORE_REG128(offset) (GZVM_REG_ARM64 | GZVM_REG_SIZE_U128 | \
+                                  GZVM_REG_ARM_CORE | ((offset) / 4))
 
 #define GZVM_REGS_X(i)      ((i) * 8)
+#define GZVM_REGS_SP        (31 * 8)
 #define GZVM_REGS_PC        (32 * 8)
 #define GZVM_REGS_PSTATE    (33 * 8)
-/* Additional registers within struct gzvm_regs (crosvm bindings) */
 #define GZVM_REGS_SP_EL1    (34 * 8)  /* offsetof(gzvm_regs, sp_el1)  = 272 */
 #define GZVM_REGS_ELR_EL1   (35 * 8)  /* offsetof(gzvm_regs, elr_el1) = 280 */
-#define GZVM_REGS_SPSR_EL1  (36 * 8)  /* offsetof(gzvm_regs, spsr[0]) = 288 */
+#define GZVM_REGS_SPSR(i)   (36 * 8 + (i) * 8)
+
+#define GZVM_FPREG_OFFSET   (36 * 8 + 5 * 8 + 8)
+#define GZVM_FPREG_VREG(i)  (GZVM_FPREG_OFFSET + (i) * 16)
+#define GZVM_FPREG_FPSR     (GZVM_FPREG_OFFSET + 32 * 16)
+#define GZVM_FPREG_FPCR     (GZVM_FPREG_OFFSET + 32 * 16 + 4)
+
+#define GZVM_SYSREG(op0, op1, crn, crm, op2) \
+    (GZVM_REG_ARM64_SYSREG | ((uint64_t)(op0) << 14) | \
+     ((uint64_t)(op1) << 11) | ((uint64_t)(crn) << 7) | \
+     ((uint64_t)(crm) << 3) | ((uint64_t)(op2) << 0))
 
 static int gzvm_set_one_reg(CPUState *cs, uint64_t id, void *source)
 {
@@ -74,6 +88,27 @@ static int gzvm_get_one_reg_sw(CPUState *cs, uint64_t id, void *target)
     }
 }
 
+static int gzvm_arch_put_fpsimd(CPUState *cs)
+{
+    CPUARMState *env = &ARM_CPU(cs)->env;
+    int i, ret;
+
+    for (i = 0; i < 32; i++) {
+        uint64_t *q = aa64_vfp_qreg(env, i);
+#if HOST_BIG_ENDIAN
+        uint64_t fp_val[2] = { q[1], q[0] };
+        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG128(GZVM_FPREG_VREG(i)),
+                                fp_val);
+#else
+        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG128(GZVM_FPREG_VREG(i)), q);
+#endif
+        if (ret) {
+            return ret;
+        }
+    }
+    return 0;
+}
+
 int gzvm_arch_get_registers(CPUState *cs, int level)
 {
     /*
@@ -100,80 +135,107 @@ int gzvm_arch_get_registers(CPUState *cs, int level)
 
 int gzvm_arch_put_registers(CPUState *cs, int level)
 {
+    uint64_t val;
+    uint32_t fpr;
+    int i, ret;
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
-    uint64_t val;
-    int ret;
 
-    /*
-     * 1. PSTATE = DAIF masked | EL1h for ALL VCPUs.
-     *
-     * GenieZone hypervisor owns EL2, so the guest must run at EL1h
-     * (not EL2h which QEMU's arm_emulate_firmware_reset would set).
-     * This matches crosvm's PSR_D_BIT | PSR_A_BIT | PSR_I_BIT |
-     * PSR_F_BIT | PSR_MODE_EL1H = 0x3C5.
-     *
-     * crosvm aarch64/src/lib.rs line 1471 sets PSTATE unconditionally
-     * for every VCPU (including non-boot), then only sets PC/X0 for
-     * the boot CPU.  Non-boot VCPUs start powered-off and the
-     * hypervisor sets their PC/X0 from PSCI CPU_ON args.
-     */
-    val = PSTATE_DAIF | PSTATE_MODE_EL1h;
+    if (cs->cpu_index != 0) {
+        /*
+         * GZVM hypervisor initializes secondary VCPUs in powered-off state.
+         * Only PSTATE is needed; all other registers are set by PSCI CPU_ON.
+         * Writing x0-x30/PC/SP on non-boot VCPUs is rejected by hypervisor.
+         * This matches crosvm's GenieZone VCPU init behavior.
+         */
+        val = pstate_read(env);
+        return gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
+    }
+
+    if (!is_a64(env)) {
+        aarch64_sync_32_to_64(env);
+    }
+
+    for (i = 0; i < 31; i++) {
+        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(i)),
+                                &env->xregs[i]);
+        if (ret) {
+            error_report("gzvm    │put_registers: x%d failed (errno=%d)",
+                         i, errno);
+            return ret;
+        }
+    }
+
+    aarch64_save_sp(env, 1);
+    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP),
+                            &env->sp_el[0]);
+    if (ret) {
+        error_report("gzvm    │put_registers: sp failed (errno=%d)", errno);
+        return ret;
+    }
+    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP_EL1),
+                            &env->sp_el[1]);
+    if (ret) {
+        error_report("gzvm    │put_registers: sp_el1 failed (errno=%d)", errno);
+        return ret;
+    }
+
+    if (is_a64(env)) {
+        val = pstate_read(env);
+    } else {
+        val = cpsr_read(env);
+    }
     ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
     if (ret) {
         error_report("gzvm    │put_registers: pstate failed (errno=%d)", errno);
         return ret;
     }
 
-    if (cs->cpu_index == 0) {
-        /* 2. PC = kernel entry (boot.c sets env->pc = info->entry) */
-        val = env->pc;
-        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &val);
-        if (ret) {
-            error_report("gzvm    │put_registers: pc failed (errno=%d)", errno);
-            return ret;
-        }
+    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &env->pc);
+    if (ret) {
+        error_report("gzvm    │put_registers: pc failed (errno=%d)", errno);
+        return ret;
+    }
 
-        /* 3. X0 = DTB address (boot.c sets env->xregs[0] = info->dtb_start) */
-        val = env->xregs[0];
-        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(0)), &val);
+    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_ELR_EL1),
+                            &env->elr_el[1]);
+    if (ret) {
+        error_report("gzvm    │put_registers: elr_el1 failed (errno=%d)", errno);
+        return ret;
+    }
+
+    {
+        unsigned int el = arm_current_el(env);
+        if (el > 0 && !is_a64(env)) {
+            i = bank_number(env->uncached_cpsr & CPSR_M);
+            env->banked_spsr[i] = env->spsr;
+        }
+    }
+    for (i = 0; i < 5; i++) {
+        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SPSR(i)),
+                                &env->banked_spsr[i + 1]);
         if (ret) {
-            error_report("gzvm    │put_registers: x0 failed (errno=%d)", errno);
+            error_report("gzvm    │put_registers: spsr[%d] failed (errno=%d)",
+                         i, errno);
             return ret;
         }
     }
 
-    /* No FPSIMD, no sysreg writes — matches crosvm for GZVM_SET_ONE_REG path */
+    gzvm_arch_put_fpsimd(cs);
 
-    /*
-     * Set system registers that the hypervisor may check: ELR_EL1 (return
-     * address for ERET), SPSR_EL1 (PSTATE restore), and SP_EL1 (stack ptr).
-     * Even though crosvm doesn't set these explicitly (the hypervisor
-     * initialises them from the VCPU context), QEMU's CPU reset may leave
-     * stale values that confuse the hypervisor's entry check.
-     */
-    if (cs->cpu_index == 0) {
-        val = env->pc;
-        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_ELR_EL1), &val);
-        if (ret) {
-            error_report("gzvm    │put_registers: elr_el1 failed (errno=%d)", errno);
-            return ret;
-        }
+    fpr = vfp_get_fpsr(env);
+    gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPSR), &fpr);
+    fpr = vfp_get_fpcr(env);
+    gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPCR), &fpr);
 
-        val = PSTATE_DAIF | PSTATE_MODE_EL1h;
-        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SPSR_EL1), &val);
+    {
+        uint64_t val64 = UINT64_MAX;
+        ret = gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 0, 2),
+                                &val64);
         if (ret) {
-            error_report("gzvm    │put_registers: spsr_el1 failed (errno=%d)", errno);
-            return ret;
         }
-
-        /* SP_EL1 = top of RAM (safe default stack) */
-        val = 0x88000000ULL;
-        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP_EL1), &val);
-        if (ret) {
-            error_report("gzvm    │put_registers: sp_el1 failed (errno=%d)", errno);
-            return ret;
-        }
+        val64 = 0;
+        gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 3, 1), &val64);
     }
 
     return 0;
