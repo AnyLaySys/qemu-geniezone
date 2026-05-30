@@ -75,7 +75,7 @@ static int gzvm_get_one_reg_sw(CPUState *cs, uint64_t id, void *target)
 
     switch (id) {
     case GZVM_CORE_REG(GZVM_REGS_PSTATE):
-        *(uint64_t *)target = PSTATE_DAIF | PSTATE_MODE_EL1h;
+        *(uint64_t *)target = env->pstate;
         return 0;
     case GZVM_CORE_REG(GZVM_REGS_PC):
         *(uint64_t *)target = env->pc;
@@ -229,11 +229,10 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPCR), &fpr);
 
     {
+        /* Disable physical timer (CNTP_CVAL_EL0 = UINT64_MAX) */
         uint64_t val64 = UINT64_MAX;
-        ret = gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 0, 2),
-                                &val64);
-        if (ret) {
-        }
+        gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 0, 2), &val64);
+        /* Disable virtual timer (CNTV_CTL_EL0 = 0) */
         val64 = 0;
         gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 3, 1), &val64);
     }

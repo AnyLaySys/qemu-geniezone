@@ -36,8 +36,6 @@ TAGS
 ctags
 cscope.*
 
-# User scripts
-make.sh
 
 # Submodules / ROMs / prebuilts
 roms/*
