@@ -9,7 +9,6 @@ env:
   apiLevel: 35
   ndkPath: "$HOME/android-ndk-r30-beta1"
   toolchain: "$HOME/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -59,8 +58,9 @@ jobs:
         "$toolchain/bin/llvm-strip" --strip-all "$qvmDir/qemu-system-aarch64" "$qvmDir"/*.so
         tar --numeric-owner -c qvm | xz > qvm.xz
     - name: 上传
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: qvm
         path: qvm.xz
+        archive: false
         if-no-files-found: error
