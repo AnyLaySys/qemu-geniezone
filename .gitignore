@@ -20,9 +20,7 @@ qemu-version.h
 # Python
 *.pyc
 __pycache__/
-pyvenv/*
-!pyvenv/
-!pyvenv/meson.build
+pyvenv/
 
 # Editor / IDE
 /.vscode/

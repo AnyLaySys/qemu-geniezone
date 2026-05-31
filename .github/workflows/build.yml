@@ -30,7 +30,14 @@ jobs:
         ./1.sh
     - name: 拉取源码
       run: |
-        git clone https://github.com/AnyLaySys/qemu-geniezone.git build/src/qemu-geniezone-main
+        git clone --recurse-submodules https://github.com/AnyLaySys/qemu-geniezone.git build/src/qemu-geniezone-main
+        mkdir -p build/src/qemu-geniezone-main/pyvenv
+        wget https://raw.githubusercontent.com/qemu/qemu/master/pyvenv/meson.build -O build/src/qemu-geniezone-main/pyvenv/meson.build
+        mkdir -p build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-softfloat-3 build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-testfloat-3
+        wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-softfloat-3/meson.build -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-softfloat-3/meson.build
+        wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-softfloat-3/meson_options.txt -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-softfloat-3/meson_options.txt
+        wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-testfloat-3/meson.build -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-testfloat-3/meson.build
+        wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-testfloat-3/meson_options.txt -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-testfloat-3/meson_options.txt
     - name: 开始编译
       run: |
         set -e
