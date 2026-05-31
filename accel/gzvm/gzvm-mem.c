@@ -217,12 +217,19 @@ int gzvm_create_vm(void)
     s->vmfd = ret;
 
     {
-        uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
-        int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
-        if (r == 0) {
-            error_report("gzvm    │IPA size: %d bits", (int)cap);
+        /*
+         * GZVM_CHECK_EXTENSION passes the extension number as the ioctl arg
+         * and returns the feature value (>0) on success, 0 if unsupported.
+         * Do NOT pass &cap — the kernel reads the arg directly as an unsigned
+         * long, not as a pointer to a value.
+         */
+        int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION,
+                              (void *)(uintptr_t)GZVM_CAP_ARM_VM_IPA_SIZE);
+        if (r > 0) {
+            error_report("gzvm    │IPA size: %d bits", r);
         } else {
-            error_report("gzvm    │IPA size probe failed, assuming 40 bits");
+            error_report("gzvm    │IPA size probe failed (r=%d), assuming 40 bits",
+                         r);
         }
     }
 
@@ -240,10 +247,10 @@ int gzvm_create_vm(void)
             { GZVM_CAP_QUERY_DESTROY_BATCH_PAGES, "DESTROY_BATCH_PAGES" },
         };
         for (int i = 0; i < (int)ARRAY_SIZE(cap_list); i++) {
-            uint64_t c = cap_list[i].cap;
-            int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &c);
-            if (r == 0) {
-                error_report("gzvm    │cap %s = %" PRIu64, cap_list[i].name, c);
+            int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION,
+                                  (void *)(uintptr_t)cap_list[i].cap);
+            if (r > 0) {
+                error_report("gzvm    │cap %s = %d", cap_list[i].name, r);
             }
         }
     }
