@@ -25,13 +25,13 @@ static int gzvm_detect_exit_reason(struct gzvm_vcpu_run *run)
 static void gzvm_ipi_signal(int sig)
 {
     if (current_cpu) {
-        GZVCPU(current_cpu)->run->immediate_exit = 1;
+        qatomic_set(&GZVCPU(current_cpu)->run->immediate_exit, 1);
     }
 }
 
 static void gzvm_cpu_kick_self(void)
 {
-    GZVCPU(current_cpu)->run->immediate_exit = 1;
+    qatomic_set(&GZVCPU(current_cpu)->run->immediate_exit, 1);
 }
 
 static void gzvm_init_cpu_signals(void)
