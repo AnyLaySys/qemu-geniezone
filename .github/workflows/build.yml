@@ -6,9 +6,9 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 env:
-  API_LEVEL: 35
-  NDK_PATH: "/home/runner/android-ndk-r30-beta1"
-  TOOLCHAIN: "/home/runner/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
+  apiLevel: 35
+  ndkPath: "~/android-ndk-r30-beta1"
+  toolchain: "~/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -37,17 +37,8 @@ jobs:
         srcDir="$GITHUB_WORKSPACE/build/src/qemu-geniezone-main"
         sysrootDir="$GITHUB_WORKSPACE/build/sysroot"
         cd "$srcDir"
-        env PATH="$TOOLCHAIN/bin:$sysrootDir/bin:$PATH" \
-            PKG_CONFIG=/usr/bin/pkg-config \
-            PKG_CONFIG_LIBDIR="$sysrootDir/lib/pkgconfig" \
-            PKG_CONFIG_PATH="$sysrootDir/lib/pkgconfig" \
-            LDFLAGS="-L$sysrootDir/lib -Wl,-rpath-link,$sysrootDir/lib" \
-            AR="$TOOLCHAIN/bin/llvm-ar" \
-            NM="$TOOLCHAIN/bin/llvm-nm" \
-            OBJCOPY="$TOOLCHAIN/bin/llvm-objcopy" \
-            RANLIB="$TOOLCHAIN/bin/llvm-ranlib" \
-            STRIP="$TOOLCHAIN/bin/llvm-strip" \
-            ./configure --target-list=aarch64-softmmu --enable-gzvm --disable-gio --disable-werror --disable-docs --disable-tools --disable-guest-agent --disable-opengl --disable-virglrenderer --disable-vhost-user --disable-vhost-user-blk-server --disable-vhost-vdpa --disable-vhost-kernel --disable-vhost-net --disable-vhost-crypto --disable-libvduse --disable-vduse-blk-export --disable-virtfs --disable-multiprocess --disable-dbus-display --disable-qemu-vnc --disable-vnc --disable-tpm --disable-usb-redir --cpu=aarch64 --cross-prefix=aarch64-linux-android- --cc="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang" --cxx="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang++" --with-coroutine=sigaltstack --extra-cflags="-I$sysrootDir/include"
+        eval toolchainPath="$toolchain"
+        env PATH="$toolchainPath/bin:$sysrootDir/bin:$PATH" PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR="$sysrootDir/lib/pkgconfig" PKG_CONFIG_PATH="$sysrootDir/lib/pkgconfig" LDFLAGS="-L$sysrootDir/lib -Wl,-rpath-link,$sysrootDir/lib" AR="$toolchainPath/bin/llvm-ar" NM="$toolchainPath/bin/llvm-nm" OBJCOPY="$toolchainPath/bin/llvm-objcopy" RANLIB="$toolchainPath/bin/llvm-ranlib" STRIP="$toolchainPath/bin/llvm-strip" ./configure --target-list=aarch64-softmmu --enable-gzvm --enable-tcg --disable-kvm --disable-hax --disable-whpx --disable-nvmm --disable-hvf --disable-gio --disable-werror --disable-docs --disable-tools --disable-guest-agent --disable-opengl --disable-virglrenderer --disable-vhost-user --disable-vhost-user-blk-server --disable-vhost-vdpa --disable-vhost-kernel --disable-vhost-net --disable-vhost-crypto --disable-libvduse --disable-vduse-blk-export --disable-virtfs --disable-multiprocess --disable-dbus-display --disable-qemu-vnc --disable-tpm --disable-usb-redir --disable-aspeed-firmware --cpu=aarch64 --cross-prefix=aarch64-linux-android- --cc="$toolchainPath/bin/aarch64-linux-android${apiLevel}-clang" --cxx="$toolchainPath/bin/aarch64-linux-android${apiLevel}-clang++" --with-coroutine=sigaltstack --extra-cflags="-I$sysrootDir/include"
         ninja -C build -j$(nproc) qemu-system-aarch64
     - name: 开始打包
       run: |
@@ -56,6 +47,7 @@ jobs:
         sysrootDir="$GITHUB_WORKSPACE/build/sysroot"
         qvmDir="$GITHUB_WORKSPACE/qvm"
         mkdir -p "$qvmDir/pc-bios/keymaps"
+        eval toolchainPath="$toolchain"
         cp "$srcDir/build/qemu-system-aarch64" "$qvmDir/qemu-system-aarch64"
         cp -L "$sysrootDir/lib/libpixman-1.so" "$qvmDir/libpixman-1.so" || true
         cp -L "$sysrootDir/lib/libusb-1.0.so" "$qvmDir/libusb-1.0.so" || true
@@ -63,14 +55,14 @@ jobs:
         cp -L "$sysrootDir/lib/libgmodule-2.0.so.0" "$qvmDir/libgmodule-2.0.so.0" || true
         cp -L "$sysrootDir/lib/libintl.so.8" "$qvmDir/libintl.so.8" || true
         cp -L "$sysrootDir/lib/libpcre2-8.so" "$qvmDir/libpcre2-8.so" || true
-        cp -L "$TOOLCHAIN/sysroot/usr/lib/aarch64-linux-android/$API_LEVEL/libz.so" "$qvmDir/libz.so"
+        cp -L "$toolchainPath/sysroot/usr/lib/aarch64-linux-android/$apiLevel/libz.so" "$qvmDir/libz.so"
         cp "$srcDir/pc-bios/keymaps/en-us" "$qvmDir/pc-bios/keymaps/en-us"
         cp "$srcDir/pc-bios/efi-virtio.rom" "$qvmDir/pc-bios/efi-virtio.rom"
-        "$TOOLCHAIN/bin/llvm-strip" --strip-all "$QVM_DIR/qemu-system-aarch64" "$QVM_DIR"/*.so
-        tar --numeric-owner -c qvm | xz > qvm.tar.xz
+        "$toolchainPath/bin/llvm-strip" --strip-all "$qvmDir/qemu-system-aarch64" "$qvmDir"/*.so
+        tar --numeric-owner -c qvm | xz > qvm.xz
     - name: 上传产物
       uses: actions/upload-artifact@v4
       with:
-        name: qemu-system-aarch64-xz
-        path: qvm.tar.xz
+        name: qemu-system-aarch64
+        path: qvm.xz
         if-no-files-found: error
