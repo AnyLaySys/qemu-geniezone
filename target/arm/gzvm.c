@@ -10,6 +10,7 @@
 #include "system/gzvm.h"
 #include "system/gzvm_int.h"
 #include "linux-headers/linux/gzvm.h"
+#include "cpu-sysregs.h"
 
 #define GZVM_CORE_REG(offset)  (GZVM_REG_ARM64 | GZVM_REG_SIZE_U64 | \
                                 GZVM_REG_ARM_CORE | ((offset) / 4))
@@ -35,6 +36,12 @@
     (GZVM_REG_ARM64_SYSREG | ((uint64_t)(op0) << 14) | \
      ((uint64_t)(op1) << 11) | ((uint64_t)(crn) << 7) | \
      ((uint64_t)(crm) << 3) | ((uint64_t)(op2) << 0))
+
+#define DEF(NAME, OP0, OP1, CRN, CRM, OP2) [NAME##_IDX] = #NAME,
+static const char * const gzvm_id_reg_names[NUM_ID_IDX] = {
+#include "cpu-sysregs.h.inc"
+};
+#undef DEF
 
 static int gzvm_set_one_reg(CPUState *cs, uint64_t id, void *source)
 {
@@ -264,15 +271,90 @@ static uint32_t gzvm_arm_read_midr(void)
     return midr;
 }
 
-static uint64_t gzvm_arm_host_features(void)
+static bool gzvm_read_host_sysreg(const char *name, uint64_t *value)
 {
-    return BIT(ARM_FEATURE_V8) |
-           BIT(ARM_FEATURE_AARCH64) |
-           BIT(ARM_FEATURE_V7) |
-           BIT(ARM_FEATURE_V7VE) |
-           BIT(ARM_FEATURE_GENERIC_TIMER) |
-           BIT(ARM_FEATURE_NEON) |
-           BIT(ARM_FEATURE_PMU);
+    char *lower = g_ascii_strdown(name, -1);
+    char *path = g_strdup_printf(
+        "/sys/devices/system/cpu/cpu0/regs/identification/%s", lower);
+    char *contents = NULL;
+    char *end;
+    bool ok = false;
+
+    if (g_file_get_contents(path, &contents, NULL, NULL)) {
+        *value = g_ascii_strtoull(contents, &end, 0);
+        ok = end != contents;
+    }
+
+    g_free(contents);
+    g_free(path);
+    g_free(lower);
+    return ok;
+}
+
+static uint64_t gzvm_arm_host_features_from_idregs(ARMISARegisters *isar)
+{
+    uint64_t features = BIT(ARM_FEATURE_V8) |
+                        BIT(ARM_FEATURE_AARCH64) |
+                        BIT(ARM_FEATURE_V7) |
+                        BIT(ARM_FEATURE_V7VE) |
+                        BIT(ARM_FEATURE_GENERIC_TIMER);
+    uint64_t pfr0 = GET_IDREG(isar, ID_AA64PFR0);
+    uint64_t dfr0 = GET_IDREG(isar, ID_AA64DFR0);
+
+    if (FIELD_EX64(pfr0, ID_AA64PFR0, ADVSIMD) != 0xf) {
+        features |= BIT(ARM_FEATURE_NEON);
+    }
+    if (FIELD_EX64(pfr0, ID_AA64PFR0, EL2) != 0) {
+        features |= BIT(ARM_FEATURE_EL2);
+    }
+    if (FIELD_EX64(pfr0, ID_AA64PFR0, EL3) != 0) {
+        features |= BIT(ARM_FEATURE_EL3);
+    }
+    if (FIELD_EX64(dfr0, ID_AA64DFR0, PMUVER) != 0 &&
+        FIELD_EX64(dfr0, ID_AA64DFR0, PMUVER) != 0xf) {
+        features |= BIT(ARM_FEATURE_PMU);
+    }
+
+    return features;
+}
+
+static bool gzvm_arm_read_host_cpu_features(ARMCPU *cpu)
+{
+    ARMISARegisters *isar = &cpu->isar;
+    uint64_t value;
+    int read = 0;
+
+    for (int i = 0; i < NUM_ID_IDX; i++) {
+        if (gzvm_id_reg_names[i] &&
+            gzvm_read_host_sysreg(gzvm_id_reg_names[i], &value)) {
+            isar->idregs[i] = value;
+            read++;
+        }
+    }
+
+    if (!read || !GET_IDREG(isar, ID_AA64PFR0)) {
+        return false;
+    }
+
+    isar->mvfr0 = (uint32_t)GET_IDREG(isar, MVFR0);
+    isar->mvfr1 = (uint32_t)GET_IDREG(isar, MVFR1);
+    isar->mvfr2 = (uint32_t)GET_IDREG(isar, MVFR2);
+
+    if (gzvm_read_host_sysreg("MIDR_EL1", &value)) {
+        cpu->midr = value;
+    } else {
+        cpu->midr = gzvm_arm_read_midr();
+    }
+    if (gzvm_read_host_sysreg("REVIDR_EL1", &value)) {
+        cpu->revidr = value;
+    }
+    if (gzvm_read_host_sysreg("CTR_EL0", &value)) {
+        cpu->ctr = value;
+    } else {
+        cpu->ctr = isar->idregs[CTR_EL0_IDX];
+    }
+
+    return true;
 }
 
 void gzvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
@@ -280,38 +362,19 @@ void gzvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
     ARMISARegisters *isar = &cpu->isar;
     CPUARMState *env = &cpu->env;
 
-    /*
-     * Use safe ARMv8.0 defaults instead of reading MRS from the host CPU.
-     * Reading host MRS values on modern cores returns SVE/SME/SVE2/BF16/etc.
-     * which the GenieZone hypervisor (EL2 firmware) cannot virtualize.
-     * This matches crosvm's behavior: VmCap::Sve => false.
-     *
-     * If the hypervisor reports different features via GZVM_CHECK_EXTENSION,
-     * we could probe those here in the future.
-     */
+    if (!gzvm_arm_read_host_cpu_features(cpu)) {
+        cpu->host_cpu_probe_failed = true;
+        return;
+    }
 
-    SET_IDREG(isar, ID_AA64PFR0,  0x00000011);
-    SET_IDREG(isar, ID_AA64PFR1,  0x00000000);
-    SET_IDREG(isar, ID_AA64PFR2,  0x00000000);
-    SET_IDREG(isar, ID_AA64DFR0,  0x00000000);
-    SET_IDREG(isar, ID_AA64DFR1,  0x00000000);
-    SET_IDREG(isar, ID_AA64MMFR0, 0x00000011);
-    SET_IDREG(isar, ID_AA64MMFR1, 0x00000000);
-    SET_IDREG(isar, ID_AA64MMFR2, 0x00000000);
-    SET_IDREG(isar, ID_AA64MMFR3, 0x00000000);
-    SET_IDREG(isar, ID_AA64ISAR0, 0x00000000);
-    SET_IDREG(isar, ID_AA64ISAR1, 0x00000000);
-    SET_IDREG(isar, ID_AA64ISAR2, 0x00000000);
-    SET_IDREG(isar, ID_AA64ISAR3, 0x00000000);
-    /* SVE, SME, FPFR explicitly zeroed — hypervisor doesn't virtualize these */
-    SET_IDREG(isar, ID_AA64ZFR0,  0x00000000);
-    SET_IDREG(isar, ID_AA64SMFR0, 0x00000000);
-    SET_IDREG(isar, ID_AA64FPFR0, 0x00000000);
-
-    env->features = gzvm_arm_host_features();
-    cpu->midr = gzvm_arm_read_midr();
-    cpu->revidr = 0;
-    cpu->ctr = 0x80030003;
+    env->features = gzvm_arm_host_features_from_idregs(isar);
     cpu->reset_sctlr = 0x00c50078;
     cpu->dtb_compatible = "arm,armv8";
+
+    if (cpu_isar_feature(aa64_sve, cpu)) {
+        cpu->sve_vq.supported = MAKE_64BIT_MASK(0, ARM_MAX_VQ);
+    }
+    if (cpu_isar_feature(aa64_sme, cpu)) {
+        cpu->sme_vq.supported = SVE_VQ_POW2_MAP;
+    }
 }

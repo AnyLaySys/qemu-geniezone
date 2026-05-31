@@ -864,6 +864,8 @@ static void aarch64_host_initfn(Object *obj)
 #if defined(CONFIG_GZVM)
     if (gzvm_enabled()) {
         gzvm_arm_set_cpu_features_from_host(cpu);
+        aarch64_add_sve_properties(obj);
+        aarch64_add_sme_properties(obj);
         return;
     }
 #endif
@@ -906,7 +908,7 @@ static const ARMCPUInfo aarch64_cpus[] = {
     { .name = "cortex-a57",         .initfn = aarch64_a57_initfn },
     { .name = "cortex-a53",         .initfn = aarch64_a53_initfn },
     { .name = "max",                .initfn = aarch64_max_initfn },
-#if defined(CONFIG_KVM) || defined(CONFIG_HVF) || defined(CONFIG_WHPX)
+#if defined(CONFIG_KVM) || defined(CONFIG_HVF) || defined(CONFIG_WHPX) || defined(CONFIG_GZVM)
     { .name = "host",               .initfn = aarch64_host_initfn },
 #endif
 };

@@ -24,6 +24,7 @@
 #include "qemu/target-info.h"
 #include "hw/core/boards.h"
 #include "kvm_arm.h"
+#include "system/gzvm.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
 #include "qapi/qobject-input-visitor.h"
@@ -96,8 +97,8 @@ CpuModelExpansionInfo *qmp_query_cpu_model_expansion(CpuModelExpansionType type,
         return NULL;
     }
 
-    if (!kvm_enabled() && !strcmp(model->name, "host")) {
-        error_setg(errp, "The CPU type '%s' requires KVM", model->name);
+    if (!kvm_enabled() && !gzvm_enabled() && !strcmp(model->name, "host")) {
+        error_setg(errp, "The CPU type '%s' requires KVM or GZVM", model->name);
         return NULL;
     }
 
@@ -108,11 +109,11 @@ CpuModelExpansionInfo *qmp_query_cpu_model_expansion(CpuModelExpansionType type,
         return NULL;
     }
 
-    if (kvm_enabled()) {
+    if (kvm_enabled() || gzvm_enabled()) {
         bool supported = false;
 
         if (!strcmp(model->name, "host") || !strcmp(model->name, "max")) {
-            /* These are kvmarm's recommended cpu types */
+            /* These are the recommended cpu types for KVM/GZVM */
             supported = true;
         } else if (current_machine->cpu_type) {
             const char *cpu_type = current_machine->cpu_type;
@@ -120,13 +121,13 @@ CpuModelExpansionInfo *qmp_query_cpu_model_expansion(CpuModelExpansionType type,
 
             if (strlen(model->name) == len &&
                 !strncmp(model->name, cpu_type, len)) {
-                /* KVM is enabled and we're using this type, so it works. */
+                /* Accelerator is enabled and we're using this type, so it works. */
                 supported = true;
             }
         }
         if (!supported) {
             error_setg(errp, "We cannot guarantee the CPU type '%s' works "
-                             "with KVM on this host", model->name);
+                             "with KVM/GZVM on this host", model->name);
             return NULL;
         }
     }

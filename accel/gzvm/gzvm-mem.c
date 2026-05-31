@@ -135,8 +135,9 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
         return;
     }
 
-    /* Match crosvm: only register main RAM, skip low firmware/secure regions */
-    if (section->offset_within_address_space < s->ram_base) {
+    /* Skip secure/MMIO regions below RAM; keep firmware ROM/ROMD regions */
+    if (section->offset_within_address_space < s->ram_base &&
+        !memory_region_is_rom(area) && !memory_region_is_romd(area)) {
         return;
     }
 

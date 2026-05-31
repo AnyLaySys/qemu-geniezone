@@ -2729,7 +2729,7 @@ static void finalize_msi_controller(VirtMachineState *vms)
         }  else if (hvf_enabled() && hvf_irqchip_in_kernel()) {
             vms->msi_controller = VIRT_MSI_CTRL_GICV2M;
         } else if (gzvm_enabled()) {
-            vms->msi_controller = VIRT_MSI_CTRL_NONE;
+            vms->msi_controller = VIRT_MSI_CTRL_GICV2M;
         } else if (vms->gic_version == VIRT_GIC_VERSION_5) {
             /* GICv5 ITS is not yet implemented */
             vms->msi_controller = VIRT_MSI_CTRL_NONE;
@@ -3187,6 +3187,11 @@ static void machvirt_init(MachineState *machine)
 
     create_pcie(vms);
     create_cxl_host_reg_region(vms);
+
+    if (gzvm_enabled() && vms->bus && MACHINE(vms)->enable_graphics &&
+        !vga_interface_created) {
+        pci_create_simple(vms->bus, -1, "virtio-gpu-pci");
+    }
 
     if (aarch64 && firmware_loaded && virt_is_acpi_enabled(vms)) {
         vms->acpi_dev = create_acpi_ged(vms);
