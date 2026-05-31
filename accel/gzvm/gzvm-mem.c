@@ -282,12 +282,12 @@ int gzvm_create_vm(void)
         };
         ret = gzvm_vm_ioctl(GZVM_CREATE_DEVICE, &dist_dev);
         if (ret) {
-            error_report("gzvm    │GZVM_CREATE_DEVICE VGIC_DIST failed early: %s (errno=%d)",
+            error_report("gzvm    │GZVM_CREATE_DEVICE VGIC_DIST failed: %s (errno=%d)",
                          strerror(errno), errno);
-        } else {
-            error_report("gzvm    │VGICv3 DIST created early at 0x8000000");
-            s->gic_dist_base = 0x08000000ULL;
+            exit(1);
         }
+        error_report("gzvm    │VGICv3 DIST created early at 0x8000000");
+        s->gic_dist_base = 0x08000000ULL;
     }
 
     /*
@@ -305,12 +305,12 @@ int gzvm_create_vm(void)
         };
         ret = gzvm_vm_ioctl(GZVM_CREATE_DEVICE, &redist_dev);
         if (ret) {
-            error_report("gzvm    │GZVM_CREATE_DEVICE VGIC_REDIST failed early: %s (errno=%d)",
+            error_report("gzvm    │GZVM_CREATE_DEVICE VGIC_REDIST failed: %s (errno=%d)",
                          strerror(errno), errno);
-        } else {
-            error_report("gzvm    │VGICv3 REDIST created early at 0x80A0000");
-            s->gic_redist_base = 0x080A0000ULL;
+            exit(1);
         }
+        error_report("gzvm    │VGICv3 REDIST created early at 0x80A0000");
+        s->gic_redist_base = 0x080A0000ULL;
     }
 
     error_report("gzvm    │gzvm_create_vm: VM fd=%d memory listener registered", s->vmfd);
