@@ -108,8 +108,10 @@ if have_block
   else
     util_ss.add(files('filemonitor-stub.c'))
   endif
-  if host_os == 'linux'
+  if host_os == 'linux' and have_vhost_user
     util_ss.add(files('vhost-user-server.c'), vhost_user)
+  endif
+  if host_os == 'linux'
     util_ss.add(files('vfio-helpers.c'))
     util_ss.add(files('chardev_open.c'))
   endif
