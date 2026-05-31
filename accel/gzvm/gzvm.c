@@ -139,6 +139,11 @@ static int gzvm_cpu_exec(CPUState *cpu)
         g_usleep(100);
         return EXCP_INTERRUPT;
     case GZVM_EXIT_EXCEPTION:
+        error_report("gzvm    │VCPU%u exception: type=%u error_code=0x%x "
+                     "fault_gpa=0x%" PRIx64,
+                     cpu->cpu_index, run->exception.exception,
+                     run->exception.error_code,
+                     (uint64_t)run->exception.fault_gpa);
         return -1;
     case 0:
         return 0;
