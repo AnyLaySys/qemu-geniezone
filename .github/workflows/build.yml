@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 env:
   apiLevel: 35
-  ndkPath: "~/android-ndk-r30-beta1"
-  toolchain: "~/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
+  ndkPath: "$HOME/android-ndk-r30-beta1"
+  toolchain: "$HOME/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -36,6 +36,7 @@ jobs:
         set -e
         srcDir="$GITHUB_WORKSPACE/build/src/qemu-geniezone-main"
         sysrootDir="$GITHUB_WORKSPACE/build/sysroot"
+        toolchain="$HOME/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
         cd "$srcDir"
         export CC="$toolchain/bin/aarch64-linux-android$apiLevel-clang"
         export CXX="$toolchain/bin/aarch64-linux-android$apiLevel-clang++"
@@ -47,6 +48,7 @@ jobs:
         srcDir="$GITHUB_WORKSPACE/build/src/qemu-geniezone-main"
         sysrootDir="$GITHUB_WORKSPACE/build/sysroot"
         qvmDir="$GITHUB_WORKSPACE/qvm"
+        toolchain="$HOME/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
         cp "$srcDir/build/qemu-system-aarch64" "$qvmDir/qemu-system-aarch64"
         cp -L "$sysrootDir/lib/libpixman-1.so" "$qvmDir/libpixman-1.so" || true
         cp -L "$sysrootDir/lib/libusb-1.0.so" "$qvmDir/libusb-1.0.so" || true
