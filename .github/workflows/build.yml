@@ -9,26 +9,22 @@ env:
   apiLevel: 35
   ndkPath: "$HOME/android-ndk-r30-beta1"
   toolchain: "$HOME/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: 安装依赖
+    - name: 部署
       run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential ninja-build pkg-config xz-utils device-tree-compiler
+        sudo apt update
+        sudo apt install -y build-essential ninja-build pkg-config xz-utils device-tree-compiler
         sudo pip3 install --upgrade meson
-    - name: 配置 Android NDK
-      run: |
         wget https://dl.google.com/android/repository/android-ndk-r30-beta1-linux.zip -O ndk.zip
         unzip -q ndk.zip -d $HOME
-        rm ndk.zip
-    - name: 配置 sysroot
-      run: |
         wget https://raw.githubusercontent.com/AnyLaySys/qemu-gunyah-build/main/1.sh
         chmod +x ./1.sh
         ./1.sh
-    - name: 拉取源码
+    - name: 拉取
       run: |
         git clone --recurse-submodules https://github.com/AnyLaySys/qemu-geniezone.git build/src/qemu-geniezone-main
         mkdir -p build/src/qemu-geniezone-main/pyvenv
@@ -38,7 +34,7 @@ jobs:
         wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-softfloat-3/meson_options.txt -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-softfloat-3/meson_options.txt
         wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-testfloat-3/meson.build -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-testfloat-3/meson.build
         wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-testfloat-3/meson_options.txt -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-testfloat-3/meson_options.txt
-    - name: 开始编译
+    - name: 编译
       run: |
         set -e
         srcDir="$GITHUB_WORKSPACE/build/src/qemu-geniezone-main"
@@ -49,7 +45,7 @@ jobs:
         export CXX="$toolchain/bin/aarch64-linux-android$apiLevel-clang++"
         env PATH="$toolchain/bin:$sysrootDir/bin:$PATH" PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR="$sysrootDir/lib/pkgconfig" PKG_CONFIG_PATH="$sysrootDir/lib/pkgconfig" LDFLAGS="-L$sysrootDir/lib -Wl,-rpath-link,$sysrootDir/lib" AR="$toolchain/bin/llvm-ar" NM="$toolchain/bin/llvm-nm" OBJCOPY="$toolchain/bin/llvm-objcopy" RANLIB="$toolchain/bin/llvm-ranlib" STRIP="$toolchain/bin/llvm-strip" ./configure --cpu=aarch64 --cross-prefix=aarch64-linux-android- --target-list=aarch64-softmmu --enable-gzvm --enable-tcg --with-coroutine=sigaltstack --extra-cflags="-I$sysrootDir/include" --disable-dbus-display --disable-docs --disable-gio --disable-hvf --disable-kvm --disable-multiprocess --disable-nitro --disable-opengl --disable-tools --disable-guest-agent --disable-usb-redir --disable-virtfs --disable-vduse-blk-export --disable-libvduse --disable-vhost-crypto --disable-vhost-kernel --disable-vhost-net --disable-vhost-user --disable-vhost-user-blk-server --disable-vhost-vdpa --disable-virglrenderer --disable-werror --disable-qemu-vnc --disable-tpm --disable-install-blobs
         ninja -C build -j$(nproc) qemu-system-aarch64
-    - name: 开始打包
+    - name: 打包
       run: |
         set -e
         srcDir="$GITHUB_WORKSPACE/build/src/qemu-geniezone-main"
@@ -62,9 +58,9 @@ jobs:
         install -D "$srcDir/pc-bios/efi-virtio.rom" "$qvmDir/pc-bios/efi-virtio.rom"
         "$toolchain/bin/llvm-strip" --strip-all "$qvmDir/qemu-system-aarch64" "$qvmDir"/*.so
         tar --numeric-owner -c qvm | xz > qvm.xz
-    - name: 上传产物
+    - name: 上传
       uses: actions/upload-artifact@v4
       with:
-        name: qemu-system-aarch64
+        name: qvm
         path: qvm.xz
         if-no-files-found: error
