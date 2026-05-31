@@ -4,9 +4,8 @@ void gzvm_start_vm(void)
     GZVMState *s = GZVM_STATE(current_accel());
 
     error_report("gzvm    │GIC DIST+REDIST already created early (pre-VCPU)");
-    error_report("gzvm    │DIST base=0x%llx  REDIST base=0x%llx",
-                 (unsigned long long)s->gic_dist_base,
-                 (unsigned long long)s->gic_redist_base);
+    error_report("gzvm    │DIST base=0x%" PRIx64 "  REDIST base=0x%" PRIx64,
+                 s->gic_dist_base, s->gic_redist_base);
 
     {
         struct gzvm_enable_cap cap = {

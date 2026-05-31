@@ -94,6 +94,23 @@ void gzvm_set_gic_bases(uint64_t dist_base, uint64_t redist_base,
     state->gic_dist_base = dist_base;
     state->gic_redist_base = redist_base;
     state->gic_redist_size = redist_size;
+
+    /*
+     * Kernel driver creates VGIC DIST/REDIST devices with hardcoded base
+     * addresses (0x08000000 / 0x080A0000) during gzvm_create_vm() and
+     * ignores the dev_addr fields.  If the machine memory map differs,
+     * the kernel and QEMU will be out of sync — warn here.
+     */
+    if (dist_base != 0x08000000ULL) {
+        warn_report("gzvm    │machine DIST base 0x%" PRIx64
+                    " != kernel hardcoded 0x08000000; GIC may not work",
+                    dist_base);
+    }
+    if (redist_base != 0x080A0000ULL) {
+        warn_report("gzvm    │machine REDIST base 0x%" PRIx64
+                    " != kernel hardcoded 0x080A0000; GIC may not work",
+                    redist_base);
+    }
 }
 
 void gzvm_set_ram_base(uint64_t base)

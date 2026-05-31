@@ -233,7 +233,7 @@ int gzvm_create_vm(void)
         }
     }
 
-    /* Probe capabilities for diagnostics */
+    /* Probe key capabilities for diagnostics */
     {
         static const struct {
             uint64_t cap;
@@ -241,10 +241,6 @@ int gzvm_create_vm(void)
         } cap_list[] = {
             { GZVM_CAP_ARM_PROTECTED_VM,     "PROTECTED_VM" },
             { GZVM_CAP_ENABLE_IDLE,          "ENABLE_IDLE" },
-            { GZVM_CAP_BLOCK_BASED_DEMAND_PAGING, "BLOCK_DEMAND_PAGING" },
-            { GZVM_CAP_ENABLE_DEMAND_PAGING, "DEMAND_PAGING" },
-            { GZVM_CAP_QUERY_HYP_BATCH_PAGES, "HYP_BATCH_PAGES" },
-            { GZVM_CAP_QUERY_DESTROY_BATCH_PAGES, "DESTROY_BATCH_PAGES" },
         };
         for (int i = 0; i < (int)ARRAY_SIZE(cap_list); i++) {
             int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION,
