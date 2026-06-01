@@ -1,0 +1,32 @@
+# See docs/devel/tracing.rst for syntax documentation.
+
+# gzvm-ioctl.c
+gzvm_dev_ioctl(int type, void *arg) "type 0x%x, arg %p"
+gzvm_vm_ioctl(int type, void *arg) "type 0x%x, arg %p"
+gzvm_vcpu_ioctl(int cpu_index, int type, void *arg) "cpu_index %d, type 0x%x, arg %p"
+
+# gzvm-mem.c
+gzvm_add_mem_slot(int slot, uint64_t gpa, uint64_t size, void *hva, uint32_t flags) "slot=%d gpa=0x%"PRIx64" size=0x%"PRIx64" hva=%p flags=0x%x"
+gzvm_del_mem_slot(int slot, uint64_t gpa, uint64_t size) "slot=%d gpa=0x%"PRIx64" size=0x%"PRIx64
+gzvm_create_vm(int vmfd) "vmfd=%d"
+gzvm_ipa_size(int bits) "IPA size=%d bits"
+gzvm_capability(const char *name, uint64_t val) "cap %s=%"PRIu64
+gzvm_vgic_dist_created(uint64_t base) "VGICv3 DIST at 0x%"PRIx64
+gzvm_vgic_redist_created(uint64_t base) "VGICv3 REDIST at 0x%"PRIx64
+gzvm_sigsegv_handler_installed(void) ""
+
+# gzvm-vm-start.c
+gzvm_start_vm(uint64_t dist_base, uint64_t redist_base) "DIST=0x%"PRIx64" REDIST=0x%"PRIx64
+gzvm_idle_cap_enabled(void) ""
+gzvm_idle_cap_not_supported(int ret) "ret=%d"
+gzvm_set_dtb_config(uint64_t addr, uint64_t size) "addr=0x%"PRIx64" size=0x%"PRIx64
+
+# gzvm-vcpu.c
+gzvm_detect_exit_reason(uint32_t reason) "exit_reason=%u"
+
+# gzvm-mmio.c
+gzvm_handle_system_event(uint32_t type) "system_event=%u"
+
+# gzvm-irq.c
+gzvm_add_irqfd(int fd, int gsi) "fd=%d gsi=%d"
+gzvm_ioeventfd_add(int fd, uint64_t addr) "fd=%d addr=0x%"PRIx64

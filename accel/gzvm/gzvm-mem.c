@@ -1,4 +1,16 @@
+#include "qemu/osdep.h"
+#include <sys/ioctl.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include "qemu/error-report.h"
+#include "exec/cpu-common.h"
+#include "hw/core/cpu.h"
+#include "system/memory.h"
+#include "system/address-spaces.h"
+#include "system/gzvm.h"
+#include "system/gzvm_int.h"
+#include "linux-headers/linux/gzvm.h"
+#include "gzvm-internal.h"
 
 #define gzvm_slots_lock(s)    qemu_mutex_lock(&s->slots_lock)
 #define gzvm_slots_unlock(s)  qemu_mutex_unlock(&s->slots_lock)
@@ -22,13 +34,12 @@ gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
     GZVMState *s = GZVM_STATE(current_accel());
     int i;
     gzvm_slot *slot = NULL;
-    gzvm_slots_lock(s);
+
     for (i = 0; i < s->nr_slots; ++i) {
         slot = &s->slots[i];
         if (slot->size && (addr >= slot->start && addr < slot->start + slot->size))
             break;
     }
-    gzvm_slots_unlock(s);
     return slot;
 }
 
@@ -57,7 +68,7 @@ gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
 
     slot = gzvm_get_free_slot(s);
     if (!slot) {
-        error_report("No free slots to add memory!");
+        error_report("gzvm: No free memory slots available!");
         exit(1);
     }
 
@@ -71,10 +82,6 @@ gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
     gumr.guest_phys_addr = gpa;
     gumr.memory_size = size;
     gumr.userspace_addr = (__u64)(uintptr_t)hva;
-
-    error_report("gzvm    │ADD_MEM_SLOT slot=%d gpa=0x%llx size=0x%llx hva=%p flags=0x%x",
-                 slot->id, (unsigned long long)gpa, (unsigned long long)size,
-                 hva, flags);
 
     ret = gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
     if (ret) {
@@ -135,7 +142,6 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
         return;
     }
 
-    /* Skip secure/MMIO regions below RAM; keep firmware ROM/ROMD regions */
     if (section->offset_within_address_space < s->ram_base &&
         !memory_region_is_rom(area) && !memory_region_is_romd(area)) {
         return;
@@ -158,13 +164,6 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
                                        GUINT_TO_POINTER(slot->id));
     }
 
-    /*
-     * Only mark readonly/rom regions as PROTECT_FW when running as a
-     * protected VM.  For non-protected VMs use GUEST_MEM for everything,
-     * matching crosvm's GenieZone backend which never passes PROTECT_FW
-     * to the hypervisor unless runs_firmware() returns true (pVM path).
-     * The hypervisor may reject PROTECT_FW regions in non-pVM mode.
-     */
     if (s->protected_vm && (area->readonly || area->rom_device)) {
         flags = GZVM_USER_MEM_REGION_PROTECT_FW;
     }
@@ -186,8 +185,6 @@ static void gzvm_region_del(MemoryListener *listener, MemoryRegionSection *secti
     gzvm_set_phys_mem(s, section, false);
 }
 
-extern MemoryListener gzvm_ioeventfd_listener;
-
 static MemoryListener gzvm_memory_listener = {
     .name = "gzvm",
     .priority = MEMORY_LISTENER_PRIORITY_ACCEL,
@@ -208,7 +205,7 @@ int gzvm_create_vm(void)
         exit(1);
     }
 
-    ret = gzvm_ioctl(GZVM_CREATE_VM, NULL);
+    ret = gzvm_dev_ioctl(s, GZVM_CREATE_VM, NULL);
     if (ret < 0) {
         error_report("GZVM_CREATE_VM failed: %s (errno=%d)",
                      strerror(errno), errno);
@@ -217,25 +214,16 @@ int gzvm_create_vm(void)
     s->vmfd = ret;
 
     {
-        /*
-         * GZVM_CHECK_EXTENSION kernel protocol:
-         *   Input:  user pointer to uint64_t capability ID
-         *   Output: kernel writes result (0 or value) to same pointer
-         *   Return: 0 = success, -errno = error
-         * Unlike KVM_CHECK_EXTENSION, the return value from ioctl is
-         * NOT the feature value — it's only success/failure.
-         */
         uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
         int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
         if (r == 0) {
-            error_report("gzvm    │IPA size: %d bits", (int)cap);
+            error_report("gzvm: IPA size: %d bits", (int)cap);
         } else {
-            error_report("gzvm    │IPA size probe failed (r=%d), assuming 40 bits",
+            error_report("gzvm: IPA size probe failed (r=%d), assuming 40 bits",
                          r);
         }
     }
 
-    /* Probe key capabilities for diagnostics */
     {
         static const struct {
             uint64_t cap;
@@ -248,7 +236,7 @@ int gzvm_create_vm(void)
             uint64_t c = cap_list[i].cap;
             int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &c);
             if (r == 0) {
-                error_report("gzvm    │cap %s = %" PRIu64, cap_list[i].name, c);
+                error_report("gzvm: cap %s = %" PRIu64, cap_list[i].name, c);
             }
         }
     }
@@ -266,12 +254,6 @@ int gzvm_create_vm(void)
     memory_listener_register(&gzvm_memory_listener, &address_space_memory);
     memory_listener_register(&gzvm_ioeventfd_listener, &address_space_memory);
 
-    /*
-     * Create VGICv3 DIST before any VCPUs, so the kernel driver's
-     * gzvm_vgic_create() sets vgic.in_kernel = true.
-     * Kernel driver hardcodes DIST base to 0x08000000 internally,
-     * so we don't need the final GIC base address yet.
-     */
     {
         struct gzvm_create_device dist_dev = {
             .dev_type = GZVM_DEV_TYPE_ARM_VGIC_V3_DIST,
@@ -280,21 +262,13 @@ int gzvm_create_vm(void)
         };
         ret = gzvm_vm_ioctl(GZVM_CREATE_DEVICE, &dist_dev);
         if (ret) {
-            error_report("gzvm    │GZVM_CREATE_DEVICE VGIC_DIST failed: %s (errno=%d)",
+            error_report("gzvm: GZVM_CREATE_DEVICE VGIC_DIST failed: %s (errno=%d)",
                          strerror(errno), errno);
             exit(1);
         }
-        error_report("gzvm    │VGICv3 DIST created early at 0x8000000");
         s->gic_dist_base = 0x08000000ULL;
     }
 
-    /*
-     * REDIST must also be created before VCPUs, matching crosvm's order:
-     * create both DIST and REDIST first, then VCPUs.
-     * Kernel driver ignores dev_addr/dev_reg_size for REDIST (hardcoded
-     * internally to base=0x080A0000, count=0/unlimited), but we pass
-     * reasonable values for forward compatibility.
-     */
     {
         struct gzvm_create_device redist_dev = {
             .dev_type = GZVM_DEV_TYPE_ARM_VGIC_V3_REDIST,
@@ -303,14 +277,12 @@ int gzvm_create_vm(void)
         };
         ret = gzvm_vm_ioctl(GZVM_CREATE_DEVICE, &redist_dev);
         if (ret) {
-            error_report("gzvm    │GZVM_CREATE_DEVICE VGIC_REDIST failed: %s (errno=%d)",
+            error_report("gzvm: GZVM_CREATE_DEVICE VGIC_REDIST failed: %s (errno=%d)",
                          strerror(errno), errno);
             exit(1);
         }
-        error_report("gzvm    │VGICv3 REDIST created early at 0x80A0000");
         s->gic_redist_base = 0x080A0000ULL;
     }
 
-    error_report("gzvm    │gzvm_create_vm: VM fd=%d memory listener registered", s->vmfd);
     return 0;
 }

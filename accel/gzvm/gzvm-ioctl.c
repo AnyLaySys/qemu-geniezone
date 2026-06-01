@@ -1,33 +1,21 @@
-static int gzvm_ioctl(int type, ...)
+#include "qemu/osdep.h"
+#include <sys/ioctl.h>
+#include "system/gzvm.h"
+#include "system/gzvm_int.h"
+#include "gzvm-internal.h"
+
+int gzvm_dev_ioctl(GZVMState *s, int type, void *arg)
 {
-    void *arg;
-    va_list ap;
-    GZVMState *s = GZVM_STATE(current_accel());
-    assert(s->fd >= 0);
-    va_start(ap, type);
-    arg = va_arg(ap, void *);
-    va_end(ap);
     return ioctl(s->fd, type, arg);
 }
 
-int gzvm_vm_ioctl(int type, ...)
+int gzvm_vm_ioctl(int type, void *arg)
 {
-    void *arg;
-    va_list ap;
     GZVMState *s = GZVM_STATE(current_accel());
-    assert(s->vmfd >= 0);
-    va_start(ap, type);
-    arg = va_arg(ap, void *);
-    va_end(ap);
     return ioctl(s->vmfd, type, arg);
 }
 
-int gzvm_vcpu_ioctl(CPUState *cpu, int type, ...)
+int gzvm_vcpu_ioctl(CPUState *cpu, int type, void *arg)
 {
-    void *arg;
-    va_list ap;
-    va_start(ap, type);
-    arg = va_arg(ap, void *);
-    va_end(ap);
     return ioctl(GZVCPU(cpu)->fd, type, arg);
 }

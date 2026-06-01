@@ -295,12 +295,21 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
 
 static uint32_t gzvm_arm_read_midr(void)
 {
+    static uint32_t cached_midr;
+    static bool cached;
+
+    if (cached) {
+        return cached_midr;
+    }
+
     FILE *f = fopen("/proc/cpuinfo", "r");
-    char line[256];
     uint32_t midr = 0x410fd810;
     if (!f) {
+        cached_midr = midr;
+        cached = true;
         return midr;
     }
+    char line[256];
     while (fgets(line, sizeof(line), f)) {
         unsigned long val;
         if (sscanf(line, "CPU implementer : 0x%lx", &val) == 1) {
@@ -314,6 +323,8 @@ static uint32_t gzvm_arm_read_midr(void)
         }
     }
     fclose(f);
+    cached_midr = midr;
+    cached = true;
     return midr;
 }
 
@@ -335,6 +346,59 @@ static bool gzvm_read_host_sysreg(const char *name, uint64_t *value)
     g_free(path);
     g_free(lower);
     return ok;
+}
+
+/*
+ * Fallback: read identification register directly via MRS from userspace.
+ * On arm64 the ID_AA64* and other identification registers are accessible
+ * at EL0 when the kernel exposes the 'cpuid' hwcap.  Use .inst with the
+ * raw encoding to bypass assembler validation of newer register names.
+ *
+ * Some registers may not exist on older CPU implementations and will
+ * trigger SIGILL.  We catch the signal with sigsetjmp/siglongjmp so
+ * that unavailable registers are silently skipped.
+ *
+ * MRS instruction encoding: 0xD5200000 | (sysreg_enc << 5) | Rt
+ * where sysreg_enc = (op0 << 14) | (op1 << 11) | (CRn << 7) | (CRm << 3) | op2
+ * and Rt=0 (X0).  The variable v is pinned to x0 to match.
+ */
+static sigjmp_buf gzvm_sysreg_jmp;
+
+static void gzvm_sysreg_sigill(int sig)
+{
+    siglongjmp(gzvm_sysreg_jmp, 1);
+}
+
+static bool gzvm_read_sysreg_direct(int idx, uint64_t *value)
+{
+    struct sigaction sa, old;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = gzvm_sysreg_sigill;
+    sa.sa_flags = SA_NODEFER;
+    sigaction(SIGILL, &sa, &old);
+
+    if (sigsetjmp(gzvm_sysreg_jmp, 1) == 0) {
+        switch (idx) {
+#define DEF(NAME, OP0, OP1, CRN, CRM, OP2) \
+        case NAME##_IDX: { \
+            register uint64_t v asm("x0"); \
+             asm volatile(".inst " \
+                stringify(0xd5200000 | ((((OP0 << 14) | (OP1 << 11) | (CRN << 7) | (CRM << 3) | OP2) << 5) | 0)) \
+                : "=r"(v)); \
+            *value = v; \
+            sigaction(SIGILL, &old, NULL); \
+            return true; \
+        }
+#include "cpu-sysregs.h.inc"
+#undef DEF
+        default:
+            break;
+        }
+    }
+
+    sigaction(SIGILL, &old, NULL);
+    return false;
 }
 
 static uint64_t gzvm_arm_host_features_from_idregs(ARMISARegisters *isar)
@@ -372,7 +436,8 @@ static bool gzvm_arm_read_host_cpu_features(ARMCPU *cpu)
 
     for (int i = 0; i < NUM_ID_IDX; i++) {
         if (gzvm_id_reg_names[i] &&
-            gzvm_read_host_sysreg(gzvm_id_reg_names[i], &value)) {
+            (gzvm_read_host_sysreg(gzvm_id_reg_names[i], &value) ||
+             gzvm_read_sysreg_direct(i, &value))) {
             isar->idregs[i] = value;
             read++;
         }
@@ -416,6 +481,26 @@ void gzvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
     env->features = gzvm_arm_host_features_from_idregs(isar);
     cpu->reset_sctlr = 0x00c50078;
     cpu->dtb_compatible = "arm,armv8";
+
+    /*
+     * Kernel sanitizes ID_AA64MMFR0_EL1.PARANGE for EL0 MRS accesses
+     * (returns 0 = 32-bit).  Query GZVM's actual IPA capability and
+     * override PARANGE so arm_pamax() returns the correct value.
+     */
+    {
+        uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
+        int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
+        if (r == 0 && cap > 0) {
+            unsigned int gzvm_parange = round_down_to_parange_index(cap);
+            unsigned int cur_parange =
+                FIELD_EX64_IDREG(isar, ID_AA64MMFR0, PARANGE);
+            if (gzvm_parange > cur_parange) {
+                uint64_t mmfr0 = GET_IDREG(isar, ID_AA64MMFR0);
+                mmfr0 = FIELD_DP64(mmfr0, ID_AA64MMFR0, PARANGE, gzvm_parange);
+                SET_IDREG(isar, ID_AA64MMFR0, mmfr0);
+            }
+        }
+    }
 
     if (cpu_isar_feature(aa64_sve, cpu)) {
         cpu->sve_vq.supported = MAKE_64BIT_MASK(0, ARM_MAX_VQ);

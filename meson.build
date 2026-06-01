@@ -3589,6 +3589,7 @@ endif
 if have_system
   trace_events_subdirs += [
     'accel/hvf',
+    'accel/gzvm',
     'accel/kvm',
     'accel/mshv',
     'accel/nitro',

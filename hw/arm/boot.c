@@ -692,6 +692,10 @@ static void do_cpu_reset(void *opaque)
             }
 
             cpu_set_pc(cs, entry);
+
+            if (gzvm_enabled()) {
+                env->xregs[0] = info->dtb_start;
+            }
         } else {
             /*
              * If we are booting Linux then we might need to do so at:
@@ -905,7 +909,6 @@ static void arm_setup_direct_kernel_boot(ARMCPU *cpu,
                                          struct arm_boot_info *info)
 {
     /* Set up for a direct boot of a kernel image file. */
-    CPUState *cs;
     AddressSpace *as = arm_boot_address_space(cpu, info);
     ssize_t kernel_size;
     int initrd_size;
@@ -1115,13 +1118,9 @@ static void arm_setup_direct_kernel_boot(ARMCPU *cpu,
          * that we're doing a direct kernel boot.
          */
         object_child_foreach_recursive(object_get_root(),
-                                       do_arm_linux_init, info);
+                                                                               do_arm_linux_init, info);
     }
     info->is_linux = is_linux;
-
-    for (cs = first_cpu; cs; cs = CPU_NEXT(cs)) {
-        ARM_CPU(cs)->env.boot_info = info;
-    }
 }
 
 static void arm_setup_firmware_boot(ARMCPU *cpu, struct arm_boot_info *info)
@@ -1221,6 +1220,13 @@ void arm_load_kernel(ARMCPU *cpu, MachineState *ms, struct arm_boot_info *info)
         arm_setup_firmware_boot(cpu, info);
     } else {
         arm_setup_direct_kernel_boot(cpu, info);
+    }
+
+    /* Ensure boot_info is set for all CPUs (firmware boot path does not
+     * set it inside arm_setup_firmware_boot).  Without this the reset
+     * handler do_cpu_reset gets a stale/NULL info pointer.  */
+    for (cs = first_cpu; cs; cs = CPU_NEXT(cs)) {
+        ARM_CPU(cs)->env.boot_info = info;
     }
 
     /*

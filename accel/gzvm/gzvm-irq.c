@@ -1,3 +1,14 @@
+#include "qemu/osdep.h"
+#include <sys/ioctl.h>
+#include "qapi/error.h"
+#include "qemu/error-report.h"
+#include "system/memory.h"
+#include "qemu/event_notifier.h"
+#include "system/gzvm.h"
+#include "system/gzvm_int.h"
+#include "linux-headers/linux/gzvm.h"
+#include "gzvm-internal.h"
+
 int gzvm_add_irqfd(int irqfd, int gsi, bool resample, Error **errp)
 {
     int ret;
@@ -19,7 +30,7 @@ int gzvm_add_irqfd(int irqfd, int gsi, bool resample, Error **errp)
 
 static int
 gzvm_set_ioeventfd_mmio(int fd, hwaddr addr, uint32_t size, uint64_t data,
-                        bool datamatch, bool assign)
+                         bool datamatch, bool assign)
 {
     int ret;
     struct gzvm_ioeventfd io;
@@ -57,7 +68,7 @@ gzvm_mem_ioeventfd_add(MemoryListener *listener, MemoryRegionSection *section,
                                      match_data, true);
     }
     if (r < 0) {
-        error_report("gzvm    │ioeventfd_add failed addr=0x%" PRIx64 ": %s",
+        error_report("gzvm: ioeventfd_add failed addr=0x%" PRIx64 ": %s",
                      (uint64_t)section->offset_within_address_space,
                      strerror(errno));
     }

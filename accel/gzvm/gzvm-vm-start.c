@@ -1,11 +1,13 @@
+#include "qemu/osdep.h"
+#include "qemu/error-report.h"
+#include "system/gzvm.h"
+#include "system/gzvm_int.h"
+#include "gzvm-internal.h"
+
 void gzvm_start_vm(void)
 {
     int ret;
     GZVMState *s = GZVM_STATE(current_accel());
-
-    error_report("gzvm    │GIC DIST+REDIST already created early (pre-VCPU)");
-    error_report("gzvm    │DIST base=0x%" PRIx64 "  REDIST base=0x%" PRIx64,
-                 s->gic_dist_base, s->gic_redist_base);
 
     {
         struct gzvm_enable_cap cap = {
@@ -13,9 +15,7 @@ void gzvm_start_vm(void)
         };
         ret = gzvm_vm_ioctl(GZVM_ENABLE_CAP, &cap);
         if (ret) {
-            error_report("gzvm    │GZVM_CAP_ENABLE_IDLE not supported (ret=%d)", ret);
-        } else {
-            error_report("gzvm    │GZVM_CAP_ENABLE_IDLE enabled");
+            error_report("gzvm: GZVM_CAP_ENABLE_IDLE not supported (ret=%d)", ret);
         }
     }
 
@@ -36,16 +36,11 @@ void gzvm_start_vm(void)
         struct gzvm_dtb_config dtb;
         dtb.dtb_addr = s->dtb_start;
         dtb.dtb_size = s->dtb_size;
-        error_report("gzvm    │SET_DTB_CONFIG addr=0x%llx size=0x%llx",
-                     (unsigned long long)s->dtb_start,
-                     (unsigned long long)s->dtb_size);
         ret = gzvm_vm_ioctl(GZVM_SET_DTB_CONFIG, &dtb);
         if (ret != 0) {
-            error_report("gzvm    │GZVM_SET_DTB_CONFIG failed: %s (errno=%d) — aborting",
+            error_report("gzvm: GZVM_SET_DTB_CONFIG failed: %s (errno=%d) — aborting",
                          strerror(errno), errno);
             exit(1);
         }
-        error_report("gzvm    │SET_DTB_CONFIG succeeded");
     }
 }
-    

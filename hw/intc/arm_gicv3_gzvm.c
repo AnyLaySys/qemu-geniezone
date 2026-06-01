@@ -42,6 +42,8 @@ static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
         irq_num = irq;
         type = GZVM_IRQ_TYPE_SPI;
     } else {
+        warn_report("gzvm: PPI %d dropped (GZVM_IRQ_LINE cannot inject PPIs, "
+                     "handled in-kernel)", irq);
         return;
     }
 

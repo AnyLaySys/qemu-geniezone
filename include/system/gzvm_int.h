@@ -34,7 +34,6 @@ struct GZVMState {
     uint64_t ram_base;
 };
 
-
 struct GZVCPUState {
     int fd;
     struct gzvm_vcpu_run *run;
@@ -50,8 +49,8 @@ struct GZVCPUState {
 
 int gzvm_create_vm(void);
 void gzvm_start_vm(void);
-int gzvm_vm_ioctl(int type, ...);
-int gzvm_vcpu_ioctl(CPUState *cpu, int type, ...);
+int gzvm_vm_ioctl(int type, void *arg);
+int gzvm_vcpu_ioctl(CPUState *cpu, int type, void *arg);
 void *gzvm_cpu_thread_fn(void *arg);
 int gzvm_add_irqfd(int irqfd, int gsi, bool resample, Error **errp);
 int gzvm_arch_put_registers(CPUState *cs, int level);

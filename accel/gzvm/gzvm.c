@@ -1,10 +1,9 @@
 #include "qemu/osdep.h"
 #include <sys/ioctl.h>
 #include <sys/eventfd.h>
-#include <fcntl.h>
 #include <signal.h>
-#include <ucontext.h>
-#include "qemu/typedefs.h"
+#include "qemu/error-report.h"
+#include "qemu/atomic.h"
 #include "qemu/units.h"
 #include "hw/core/cpu.h"
 #include "system/cpus.h"
@@ -13,24 +12,15 @@
 #include "linux-headers/linux/gzvm.h"
 #include "exec/cpu-common.h"
 #include "system/memory.h"
-#include "qemu/error-report.h"
 #include "system/address-spaces.h"
 #include "hw/core/boards.h"
 #include "qapi/error.h"
 #include "qemu/event_notifier.h"
 #include "qemu/main-loop.h"
 #include "system/runstate.h"
+#include "qemu/timer.h"
 #include "qemu/guest-random.h"
-
-#define gz0 "\033[32mgzvm:\033[0m"
-
-#include "gzvm-signal.c"
-#include "gzvm-ioctl.c"
-#include "gzvm-mem.c"
-#include "gzvm-irq.c"
-#include "gzvm-vm-start.c"
-#include "gzvm-mmio.c"
-#include "gzvm-vcpu.c"
+#include "gzvm-internal.h"
 
 static int gzvm_init_vcpu(CPUState *cpu)
 {
@@ -106,19 +96,10 @@ static int gzvm_cpu_exec(CPUState *cpu)
     case GZVM_EXIT_INTERNAL_ERROR:
         return gzvm_handle_internal_error(cpu, run);
     case GZVM_EXIT_IDLE:
-        /*
-         * Guest WFI or VCPU powered off.  Sleep briefly to avoid
-         * busy-waiting when secondary VCPUs are idle / powered off.
-         */
-        g_usleep(100);
         return EXCP_INTERRUPT;
     case GZVM_EXIT_IRQ:
         return EXCP_INTERRUPT;
     case GZVM_EXIT_HYPERCALL:
-        /* Hypervisor handles PSCI in-kernel; other hypercalls
-         * (PTP, mem_relinquish) are handled in-kernel too.
-         * Return to guest immediately.
-         */
         return EXCP_INTERRUPT;
     case GZVM_EXIT_GZ:
         return EXCP_INTERRUPT;
@@ -128,18 +109,12 @@ static int gzvm_cpu_exec(CPUState *cpu)
         return EXCP_DEBUG;
     case GZVM_EXIT_SHUTDOWN:
         if (cpu->cpu_index == 0) {
-            /*
-             * CPU0 power-off likely means PSCI SYSTEM_OFF (system shutdown).
-             * Trigger shutdown so QEMU exits cleanly.  Secondary VCPUs
-             * get EXIT_SHUTDOWN for PSCI CPU_OFF and just wait for wakeup.
-             */
             qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
             return EXCP_INTERRUPT;
         }
-        g_usleep(100);
         return EXCP_INTERRUPT;
     case GZVM_EXIT_EXCEPTION:
-        error_report("gzvm    │VCPU%u exception: type=%u error_code=0x%x "
+        error_report("gzvm: VCPU%u exception: type=%u error_code=0x%x "
                      "fault_gpa=0x%" PRIx64,
                      cpu->cpu_index, run->exception.exception,
                      run->exception.error_code,

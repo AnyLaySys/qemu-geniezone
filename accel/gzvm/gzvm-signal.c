@@ -1,3 +1,12 @@
+#include "qemu/osdep.h"
+#include <signal.h>
+#include <ucontext.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include "qemu/error-report.h"
+#include "system/gzvm.h"
+#include "gzvm-internal.h"
+
 __attribute__((constructor))
 static void gzvm_unblock_sigbus_early(void)
 {
@@ -56,7 +65,7 @@ static void gzvm_sigsegv_handler(int sig, siginfo_t *si, void *ctx)
     raise(sig);
 }
 
-static void gzvm_install_sigsegv_handler(void)
+void gzvm_install_sigsegv_handler(void)
 {
     struct sigaction sa;
     sigset_t set;
@@ -71,5 +80,4 @@ static void gzvm_install_sigsegv_handler(void)
     sigaddset(&set, SIGBUS);
     sigaddset(&set, SIGSEGV);
     pthread_sigmask(SIG_UNBLOCK, &set, NULL);
-    error_report("gzvm    │installed SIGSEGV/SIGBUS handler");
 }
