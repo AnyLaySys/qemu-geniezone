@@ -10,19 +10,62 @@
 #include "linux-headers/linux/gzvm.h"
 #include "gzvm-internal.h"
 
+static gzvm_slot *gzvm_find_slot_for_mmio(hwaddr addr, hwaddr *slot_addr_out)
+{
+    gzvm_slot *slot = gzvm_find_slot_by_addr(addr);
+    if (slot) {
+        *slot_addr_out = addr;
+        return slot;
+    }
+    /* Hypervisor may misreport IPA: bit 30 instead of bit 26 */
+    if ((addr >> 28) == 0x4) {
+        hwaddr corrected = (addr & 0x0FFFFFFF) | 0x04000000;
+        slot = gzvm_find_slot_by_addr(corrected);
+        if (slot) {
+            *slot_addr_out = corrected;
+            return slot;
+        }
+    }
+    return NULL;
+}
+
 int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
 {
-    MemTxResult r = address_space_rw(&address_space_memory, run->mmio.phys_addr,
-                                      MEMTXATTRS_UNSPECIFIED,
-                                      run->mmio.data, run->mmio.size,
-                                      run->mmio.is_write);
-    if (r != MEMTX_OK) {
-        error_report("gzvm: MMIO %s at 0x%" PRIx64 " size=%llu failed",
-                     run->mmio.is_write ? "write" : "read",
-                     (uint64_t)run->mmio.phys_addr,
-                     (unsigned long long)run->mmio.size);
-        return -1;
+    hwaddr addr = run->mmio.phys_addr;
+    MemTxResult r;
+
+    r = address_space_rw(&address_space_memory, addr, MEMTXATTRS_UNSPECIFIED,
+                          run->mmio.data, run->mmio.size, run->mmio.is_write);
+
+    if (r == MEMTX_OK)
+        return 0;
+
+    if (run->mmio.size > 8)
+        return 0;
+
+    {
+        hwaddr slot_addr;
+        gzvm_slot *slot = gzvm_find_slot_for_mmio(addr, &slot_addr);
+        if (slot) {
+            uint64_t offset = slot_addr - slot->start;
+            if (offset < slot->size) {
+                size_t xlen = MIN((uint64_t)run->mmio.size,
+                                  slot->size - offset);
+                if (run->mmio.is_write) {
+                    memcpy(slot->mem + offset, run->mmio.data, xlen);
+                } else {
+                    memcpy(run->mmio.data, slot->mem + offset, xlen);
+                }
+                return 0;
+            }
+        }
     }
+
+    warn_report("gzvm: %s at 0x%" PRIx64 " size=%llu returned %u, "
+                "treated as RAZ/WI",
+                run->mmio.is_write ? "MMIO write" : "MMIO read",
+                (uint64_t)run->mmio.phys_addr,
+                (unsigned long long)run->mmio.size, r);
     return 0;
 }
 

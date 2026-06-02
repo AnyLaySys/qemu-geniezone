@@ -32,15 +32,20 @@ static gzvm_slot *gzvm_find_overlap_slot(GZVMState *s, uint64_t start, uint64_t 
 gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
 {
     GZVMState *s = GZVM_STATE(current_accel());
-    int i;
-    gzvm_slot *slot = NULL;
-
-    for (i = 0; i < s->nr_slots; ++i) {
-        slot = &s->slots[i];
-        if (slot->size && (addr >= slot->start && addr < slot->start + slot->size))
-            break;
+    if (!s->nr_slots) {
+        return NULL;
     }
-    return slot;
+
+    for (int i = 0; i < (int)s->nr_slots; ++i) {
+        gzvm_slot *slot = &s->slots[i];
+        if (!slot->size)
+            continue;
+        uint64_t start = slot->start;
+        uint64_t size = slot->size;
+        if (addr >= start && (addr - start) < size)
+            return slot;
+    }
+    return NULL;
 }
 
 static gzvm_slot *gzvm_get_free_slot(GZVMState *s)
@@ -131,8 +136,7 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
         return;
     }
 
-    if (!memory_region_is_ram(area) &&
-        !memory_region_is_rom(area) &&
+    if (!memory_region_is_ram(area) && !memory_region_is_rom(area) &&
         !memory_region_is_romd(area)) {
         return;
     }
