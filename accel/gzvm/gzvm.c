@@ -37,7 +37,6 @@ static int gzvm_init_vcpu(CPUState *cpu)
 
     vcpu->fd = ret;
     vcpu->run = g_new0(struct gzvm_vcpu_run, 1);
-    vcpu->last_mmio_valid = 0;
     cpu->accel = (AccelCPUState *)vcpu;
     return 0;
 }
@@ -66,28 +65,9 @@ static int gzvm_cpu_exec(CPUState *cpu)
         run->exit_reason = gzvm_detect_exit_reason(run);
     }
 
-    if (run->exit_reason != GZVM_EXIT_MMIO) {
-        GZVCPU(cpu)->last_mmio_valid = 0;
-    }
-
     switch (run->exit_reason) {
     case GZVM_EXIT_MMIO: {
-        struct GZVCPUState *vcpu = GZVCPU(cpu);
-        if (run->mmio.is_write &&
-            vcpu->last_mmio_valid &&
-            vcpu->last_mmio_addr == run->mmio.phys_addr &&
-            vcpu->last_mmio_size == run->mmio.size &&
-            !memcmp(&vcpu->last_mmio_data, run->mmio.data, run->mmio.size)) {
-            return 0;
-        }
-        int mmio_ret = gzvm_handle_mmio_exit(cpu, run);
-        if (run->mmio.is_write && mmio_ret == 0) {
-            vcpu->last_mmio_valid = 1;
-            vcpu->last_mmio_addr = run->mmio.phys_addr;
-            vcpu->last_mmio_size = run->mmio.size;
-            memcpy(&vcpu->last_mmio_data, run->mmio.data, run->mmio.size);
-        }
-        return mmio_ret;
+        return gzvm_handle_mmio_exit(cpu, run);
     }
     case GZVM_EXIT_SYSTEM_EVENT:
         return gzvm_handle_system_event(cpu, run);

@@ -21,6 +21,7 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
                      run->mmio.is_write ? "write" : "read",
                      (uint64_t)run->mmio.phys_addr,
                      (unsigned long long)run->mmio.size);
+        return -1;
     }
     return 0;
 }

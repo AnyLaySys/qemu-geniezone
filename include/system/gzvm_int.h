@@ -39,10 +39,6 @@ struct GZVCPUState {
     struct gzvm_vcpu_run *run;
     uint64_t last_fault_addr;
     int same_fault_count;
-    uint64_t last_mmio_addr;
-    uint64_t last_mmio_data;
-    uint8_t last_mmio_size;
-    uint8_t last_mmio_valid;
 };
 
 #define GZVCPU(cpu) ((struct GZVCPUState *)(cpu)->accel)
