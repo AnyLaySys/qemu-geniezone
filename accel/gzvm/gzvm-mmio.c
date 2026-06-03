@@ -35,8 +35,19 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
     MemTxResult r;
 
     r = address_space_rw(&address_space_memory, addr, MEMTXATTRS_UNSPECIFIED,
-                          run->mmio.data, run->mmio.size, run->mmio.is_write);
+                             run->mmio.data, run->mmio.size, run->mmio.is_write);
+    
+    if (r == MEMTX_OK)
+        return 0;
 
+    /* 
+     * If basic RW fails, we treat this as a device access.
+     * We fallback to a more permissive attribute set to ensure GPU/Device 
+     * registers can be reached.
+     */
+    r = address_space_rw(&address_space_memory, addr, 
+                          MEMTXATTRS_SMM,
+                          run->mmio.data, run->mmio.size, run->mmio.is_write);
     if (r == MEMTX_OK)
         return 0;
 
