@@ -32,6 +32,7 @@ struct GZVMState {
     uint64_t gic_redist_base;
     uint64_t gic_redist_size;
     uint64_t ram_base;
+    int irqfd_timer_fd;
 };
 
 struct GZVCPUState {

@@ -1,4 +1,5 @@
 #include "qemu/osdep.h"
+#include <sys/timerfd.h>
 #include "qemu/error-report.h"
 #include "system/gzvm.h"
 #include "system/gzvm_int.h"
@@ -41,6 +42,37 @@ void gzvm_start_vm(void)
             error_report("gzvm: GZVM_SET_DTB_CONFIG failed: %s (errno=%d) — aborting",
                          strerror(errno), errno);
             exit(1);
+        }
+    }
+
+    /* Set up periodic timer via IRQFD to wake VCPU from WFI */
+    {
+        int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+        struct itimerspec ts = {
+            .it_interval = { .tv_sec = 0, .tv_nsec = 5000000 },
+            .it_value = { .tv_sec = 0, .tv_nsec = 1000000 },
+        };
+
+        timerfd_settime(timer_fd, 0, &ts, NULL);
+
+        /* Try raw PPI number as GSI */
+        struct gzvm_irqfd irqfd = {
+            .fd = timer_fd,
+            .gsi = 27,
+        };
+        ret = gzvm_vm_ioctl(GZVM_IRQFD, &irqfd);
+        if (ret) {
+            /* Try GSI=0 (CPU IRQ line) */
+            irqfd.gsi = 0;
+            ret = gzvm_vm_ioctl(GZVM_IRQFD, &irqfd);
+        }
+        if (ret) {
+            warn_report("gzvm: GZVM_IRQFD not supported (errno=%d); "
+                        "timer wakeup disabled", errno);
+            close(timer_fd);
+        } else {
+            warn_report("gzvm: IRQFD timer set up on GSI=%d", irqfd.gsi);
+            s->irqfd_timer_fd = timer_fd;
         }
     }
 }
