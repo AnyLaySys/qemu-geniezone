@@ -11,9 +11,8 @@ This fork adds a ``gzvm`` accelerator (``-accel gzvm``) so you can run
 QEMU on top of GenieZone, plus a ``virt-gzvm`` machine type for ARM
 guests.
 
-It also includes a U-Boot adaptation -- the ``virt-gzvm`` board support
-handles the CPU and device setup needed to boot U-Boot as a guest under
-GZVM.
+U-Boot is also supported as a guest — see the dedicated port at
+`Alhkxsj/u-boot <https://github.com/Alhkxsj/u-boot>`_.
 
 Building
 ========
@@ -51,8 +50,7 @@ Why this exists
 
 The upstream GenieZone kernel driver provides the ``/dev/gzvm``
 interface for VMMs, but there wasn't a ready-to-use QEMU backend.
-This fork fills that gap. It also made U-Boot bootable under GZVM,
-which is useful as a lightweight firmware/loader for guest VMs.
+This fork fills that gap.
 
 Related projects:
 
