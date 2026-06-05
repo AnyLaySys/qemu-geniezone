@@ -26,12 +26,12 @@ static int gzvm_init(AccelState *as, MachineState *ms)
         return ret;
     }
 
-    gzvm_migration_blocker = NULL;
     error_setg(&gzvm_migration_blocker,
                "GZVM: migration not supported (GZVM_GET_ONE_REG not implemented by kernel)");
     ret = migrate_add_blocker(&gzvm_migration_blocker, &local_err);
     if (ret < 0) {
         error_report_err(local_err);
+        error_free(gzvm_migration_blocker);
         gzvm_migration_blocker = NULL;
         return ret;
     }
@@ -118,6 +118,7 @@ static void gzvm_accel_ops_class_init(ObjectClass *oc, const void *data)
     ops->kick_vcpu_thread = gzvm_kick_vcpu_thread;
     ops->cpu_thread_is_idle = gzvm_vcpu_thread_is_idle;
     ops->synchronize_post_reset = gzvm_cpu_synchronize_post_reset;
+    ops->synchronize_post_init = gzvm_cpu_synchronize_post_reset;
     ops->handle_interrupt = generic_handle_interrupt;
 }
 

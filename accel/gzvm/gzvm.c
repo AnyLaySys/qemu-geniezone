@@ -37,7 +37,7 @@ static int gzvm_init_vcpu(CPUState *cpu)
 
     vcpu->fd = ret;
     vcpu->run = g_new0(struct gzvm_vcpu_run, 1);
-    cpu->accel = (AccelCPUState *)vcpu;
+    qatomic_set(&cpu->accel, (AccelCPUState *)vcpu);
     return 0;
 }
 
@@ -137,7 +137,6 @@ void *gzvm_cpu_thread_fn(void *arg)
 
     ret = gzvm_init_vcpu(cpu);
     if (ret) {
-        cpu_thread_signal_created(cpu);
         cpu_thread_signal_destroyed(cpu);
         bql_unlock();
         rcu_unregister_thread();
@@ -164,7 +163,7 @@ void *gzvm_cpu_thread_fn(void *arg)
     close(GZVCPU(cpu)->fd);
     g_free(GZVCPU(cpu)->run);
     g_free(cpu->accel);
-    cpu->accel = NULL;
+    qatomic_set(&cpu->accel, NULL);
     cpu_thread_signal_destroyed(cpu);
     bql_unlock();
     rcu_unregister_thread();

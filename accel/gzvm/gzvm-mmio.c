@@ -37,22 +37,25 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
     r = address_space_rw(&address_space_memory, addr, MEMTXATTRS_UNSPECIFIED,
                              run->mmio.data, run->mmio.size, run->mmio.is_write);
     
-    if (r == MEMTX_OK)
+    if (r == MEMTX_OK) {
         return 0;
+    }
 
     /* 
      * If basic RW fails, we treat this as a device access.
      * We fallback to a more permissive attribute set to ensure GPU/Device 
      * registers can be reached.
      */
-    r = address_space_rw(&address_space_memory, addr, 
-                          MEMTXATTRS_SMM,
+    r = address_space_rw(&address_space_memory, addr,
+                          (MemTxAttrs) { .secure = true },
                           run->mmio.data, run->mmio.size, run->mmio.is_write);
-    if (r == MEMTX_OK)
+    if (r == MEMTX_OK) {
         return 0;
+    }
 
-    if (run->mmio.size > 8)
+    if (run->mmio.size > 8) {
         return 0;
+    }
 
     {
         hwaddr slot_addr;
@@ -72,11 +75,11 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
         }
     }
 
-    warn_report("gzvm: %s at 0x%" PRIx64 " size=%llu returned %u, "
+    warn_report("gzvm: %s at 0x%" PRIx64 " size=%" PRIu64 " returned %u, "
                 "treated as RAZ/WI",
                 run->mmio.is_write ? "MMIO write" : "MMIO read",
                 (uint64_t)run->mmio.phys_addr,
-                (unsigned long long)run->mmio.size, r);
+                (uint64_t)run->mmio.size, r);
     return 0;
 }
 
@@ -113,9 +116,9 @@ int gzvm_handle_internal_error(CPUState *cpu, struct gzvm_vcpu_run *run)
 {
     error_report("gzvm: CPU#%d INTERNAL_ERROR suberror=%u ndata=%u",
                  cpu->cpu_index, run->internal.suberror, run->internal.ndata);
-    for (int _i = 0; _i < run->internal.ndata && _i < 16; _i++) {
-        error_report("gzvm:   data[%d] = 0x%llx", _i,
-                     (unsigned long long)run->internal.data[_i]);
+    for (int i = 0; i < run->internal.ndata && i < 16; i++) {
+        error_report("gzvm:   data[%d] = 0x%" PRIx64, i,
+                     (uint64_t)run->internal.data[i]);
     }
     return -1;
 }

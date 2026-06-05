@@ -17,10 +17,8 @@
 
 static gzvm_slot *gzvm_find_overlap_slot(GZVMState *s, uint64_t start, uint64_t size)
 {
-    gzvm_slot *slot;
-    int i;
-    for (i = 0; i < s->nr_slots; ++i) {
-        slot = &s->slots[i];
+    for (uint32_t i = 0; i < s->nr_slots; i++) {
+        gzvm_slot *slot = &s->slots[i];
         if (slot->size && start < (slot->start + slot->size) &&
             (start + size) > slot->start) {
             return slot;
@@ -36,14 +34,14 @@ gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
         return NULL;
     }
 
-    for (int i = 0; i < (int)s->nr_slots; ++i) {
+    for (uint32_t i = 0; i < s->nr_slots; i++) {
         gzvm_slot *slot = &s->slots[i];
-        if (!slot->size)
+        if (!slot->size) {
             continue;
-        uint64_t start = slot->start;
-        uint64_t size = slot->size;
-        if (addr >= start && (addr - start) < size)
+        }
+        if (addr >= slot->start && (addr - slot->start) < slot->size) {
             return slot;
+        }
     }
     return NULL;
 }

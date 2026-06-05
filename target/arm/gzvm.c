@@ -264,7 +264,7 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
             env->banked_spsr[i] = env->spsr;
         }
     }
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < GZVM_NR_SPSR; i++) {
         ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SPSR(i)),
                                 &env->banked_spsr[i + 1]);
         if (ret) {
@@ -297,19 +297,20 @@ static uint32_t gzvm_arm_read_midr(void)
 {
     static uint32_t cached_midr;
     static bool cached;
+    FILE *f;
+    uint32_t midr = 0x410fd810;
+    char line[256];
 
     if (cached) {
         return cached_midr;
     }
 
-    FILE *f = fopen("/proc/cpuinfo", "r");
-    uint32_t midr = 0x410fd810;
+    f = fopen("/proc/cpuinfo", "r");
     if (!f) {
         cached_midr = midr;
         cached = true;
         return midr;
     }
-    char line[256];
     while (fgets(line, sizeof(line), f)) {
         unsigned long val;
         if (sscanf(line, "CPU implementer : 0x%lx", &val) == 1) {

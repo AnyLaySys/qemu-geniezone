@@ -51,8 +51,8 @@ static void gzvm_sigsegv_handler(int sig, siginfo_t *si, void *ctx)
     if (uc) {
         char buf[128];
 #if defined(__aarch64__)
-        int len = snprintf(buf, sizeof(buf), "PC=0x%llx\n",
-                            (unsigned long long)uc->uc_mcontext.pc);
+        int len = snprintf(buf, sizeof(buf), "PC=0x%" PRIx64 "\n",
+                            (uint64_t)uc->uc_mcontext.pc);
 #else
         int len = snprintf(buf, sizeof(buf), "PC unavailable on this host\n");
 #endif
