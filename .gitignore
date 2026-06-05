@@ -92,3 +92,4 @@ scripts/*/__pycache__/
 *.gcov
 *.ast_raw
 *.depend_raw
+.opencode/
