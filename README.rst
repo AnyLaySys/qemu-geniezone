@@ -53,7 +53,7 @@ of other UNIX targets. The simple steps to build QEMU are:
 .. code-block:: shell
 
   cd qemu-geniezone
-  chmod 777 make.sh
+  chmod +x make.sh
   ./make.sh
 
 Additional information can also be found online via the QEMU website:

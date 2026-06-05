@@ -7,15 +7,25 @@ config-all-devices.*
 config-all-disas.*
 trace.h
 trace-*.h
+trace*-dtrace*
+trace-ust*
 qemu-version.h
 *.a
 *.o
+*.o.*
 *.so
 *.so.*
 *.la
 *.lo
+*.dll
+*.dylib
+*.efi
 .deps/
 .libs/
+.stgit-*
+.git-submodule-status
+.clang-format
+.gdb_history
 
 # Python
 *.pyc
@@ -29,13 +39,17 @@ pyvenv/
 *.swo
 *~
 .*.swp
+opencode.jsonc
+.codegraph/
 
 # Tags / cscope
 tags
 TAGS
+GPATH
+GRTAGS
+GTAGS
 ctags
 cscope.*
-
 
 # Submodules / ROMs / prebuilts
 roms/*
@@ -45,7 +59,8 @@ pc-bios/*.rom
 pc-bios/*.dtb
 pc-bios/dtb/
 pc-bios/opensbi-*.bin
-subprojects/
+/subprojects/*/
+/rust/*/
 
 # Build generated scripts
 scripts/qemu-binfmt-conf.sh
@@ -56,3 +71,24 @@ tests/qemu-iotests/*.out.*
 tests/lcitool/
 scripts/oss-fuzz/
 scripts/*/__pycache__/
+
+# QEMU binary targets
+/qemu-bridge-helper
+/qemu-img
+/qemu-io
+/qemu-nbd
+/qemu-keymap
+/qemu-edid
+/qemu-storage-daemon
+/storage-daemon/qemu-storage-daemon
+
+# gzvm / GenieZone
+*.img.gz
+*.dtb
+*.dtbo
+
+# Misc generated
+*.patch
+*.gcov
+*.ast_raw
+*.depend_raw
