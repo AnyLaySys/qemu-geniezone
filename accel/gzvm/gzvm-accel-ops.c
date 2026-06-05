@@ -8,6 +8,7 @@
 #include "system/cpus.h"
 #include "system/gzvm.h"
 #include "system/gzvm_int.h"
+#include "gzvm-internal.h"
 #include "qapi/visitor.h"
 #include "qapi/error.h"
 #include "migration/blocker.h"
@@ -21,13 +22,15 @@ static int gzvm_init(AccelState *as, MachineState *ms)
     int ret;
     Error *local_err = NULL;
 
+    gzvm_ioctl_set_state(GZVM_STATE(as));
+
     ret = gzvm_create_vm();
     if (ret) {
         return ret;
     }
 
     error_setg(&gzvm_migration_blocker,
-               "GZVM: migration not supported (GZVM_GET_ONE_REG not implemented by kernel)");
+               "GZVM: migration not supported (no dirty page tracking or GET_ONE_REG in kernel API)");
     ret = migrate_add_blocker(&gzvm_migration_blocker, &local_err);
     if (ret < 0) {
         error_report_err(local_err);
@@ -51,6 +54,13 @@ static void gzvm_set_protected(Object *obj, bool value, Error **errp)
     s->protected_vm = value;
 }
 
+static void gzvm_accel_instance_finalize(Object *obj)
+{
+    GZVMState *s = GZVM_STATE(obj);
+    g_free(s->slots);
+    g_free(s->sorted_ids);
+}
+
 static void gzvm_accel_instance_init(Object *obj)
 {
     GZVMState *s = GZVM_STATE(obj);
@@ -58,6 +68,8 @@ static void gzvm_accel_instance_init(Object *obj)
     s->vmfd = -1;
     s->protected_vm = false;
     s->irqfd_timer_fd = -1;
+    s->slots = NULL;
+    s->sorted_ids = NULL;
     object_property_add_bool(obj, "protected",
                              gzvm_get_protected,
                              gzvm_set_protected);
@@ -81,6 +93,7 @@ static const TypeInfo gzvm_accel_type = {
     .name = TYPE_GZVM_ACCEL,
     .parent = TYPE_ACCEL,
     .instance_init = gzvm_accel_instance_init,
+    .instance_finalize = gzvm_accel_instance_finalize,
     .class_init = gzvm_accel_class_init,
     .instance_size = sizeof(GZVMState),
 };

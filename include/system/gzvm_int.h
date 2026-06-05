@@ -20,9 +20,9 @@ typedef struct gzvm_slot {
 struct GZVMState {
     AccelState parent_obj;
     QemuMutex slots_lock;
-    gzvm_slot slots[GZVM_MAX_MEM_SLOTS];
-    uint32_t nr_slots;
-    GList *free_slots;
+    gzvm_slot *slots;
+    gint *sorted_ids;
+    uint32_t nr_active_slots;
     int fd;
     int vmfd;
     bool protected_vm;

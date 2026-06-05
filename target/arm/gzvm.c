@@ -193,12 +193,6 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     CPUARMState *env = &cpu->env;
 
     if (cs->cpu_index != 0) {
-        /*
-         * GZVM hypervisor initializes secondary VCPUs in powered-off state.
-         * Only PSTATE is needed; all other registers are set by PSCI CPU_ON.
-         * Writing x0-x30/PC/SP on non-boot VCPUs is rejected by hypervisor.
-         * This matches crosvm's GenieZone VCPU init behavior.
-         */
         val = pstate_read(env);
         return gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
     }
@@ -213,8 +207,6 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
         ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(i)),
                                 &env->xregs[i]);
         if (ret) {
-            error_report("gzvm    │put_registers: x%d failed (errno=%d)",
-                         i, errno);
             return ret;
         }
     }
@@ -223,13 +215,11 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP),
                             &env->sp_el[0]);
     if (ret) {
-        error_report("gzvm    │put_registers: sp failed (errno=%d)", errno);
         return ret;
     }
     ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP_EL1),
                             &env->sp_el[1]);
     if (ret) {
-        error_report("gzvm    │put_registers: sp_el1 failed (errno=%d)", errno);
         return ret;
     }
 
@@ -240,20 +230,17 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     }
     ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
     if (ret) {
-        error_report("gzvm    │put_registers: pstate failed (errno=%d)", errno);
         return ret;
     }
 
     ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &env->pc);
     if (ret) {
-        error_report("gzvm    │put_registers: pc failed (errno=%d)", errno);
         return ret;
     }
 
     ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_ELR_EL1),
                             &env->elr_el[1]);
     if (ret) {
-        error_report("gzvm    │put_registers: elr_el1 failed (errno=%d)", errno);
         return ret;
     }
 
@@ -268,26 +255,37 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
         ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SPSR(i)),
                                 &env->banked_spsr[i + 1]);
         if (ret) {
-            error_report("gzvm    │put_registers: spsr[%d] failed (errno=%d)",
-                         i, errno);
             return ret;
         }
     }
 
-    gzvm_arch_put_fpsimd(cs);
+    ret = gzvm_arch_put_fpsimd(cs);
+    if (ret) {
+        return ret;
+    }
 
     fpr = vfp_get_fpsr(env);
-    gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPSR), &fpr);
+    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPSR), &fpr);
+    if (ret) {
+        return ret;
+    }
     fpr = vfp_get_fpcr(env);
-    gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPCR), &fpr);
+    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPCR), &fpr);
+    if (ret) {
+        return ret;
+    }
 
     {
-        /* Disable physical timer (CNTP_CVAL_EL0 = UINT64_MAX) */
         uint64_t val64 = UINT64_MAX;
-        gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 0, 2), &val64);
-        /* Disable virtual timer (CNTV_CTL_EL0 = 0) */
+        ret = gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 0, 2), &val64);
+        if (ret) {
+            return ret;
+        }
         val64 = 0;
-        gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 3, 1), &val64);
+        ret = gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 3, 1), &val64);
+        if (ret) {
+            return ret;
+        }
     }
 
     return 0;

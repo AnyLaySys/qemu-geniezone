@@ -10,6 +10,22 @@
 #include "linux-headers/linux/gzvm.h"
 #include "gzvm-internal.h"
 
+/*
+ * Determine the correct MemTxAttrs for an MMIO access.
+ * Use our O(log n) slot lookup instead of address_space_translate
+ * to avoid a full memory-tree walk.  Backed slots (slot->mem != NULL)
+ * are RAM/ROM and work with UNSPECIFIED; everything else (device MMIO
+ * or unmapped) needs secure attributes on GZVM.
+ */
+static MemTxAttrs gzvm_mmio_attrs(hwaddr addr)
+{
+    gzvm_slot *slot = gzvm_find_slot_by_addr(addr);
+    if (slot && slot->mem) {
+        return MEMTXATTRS_UNSPECIFIED;
+    }
+    return (MemTxAttrs) { .secure = true };
+}
+
 static gzvm_slot *gzvm_find_slot_for_mmio(hwaddr addr, hwaddr *slot_addr_out)
 {
     gzvm_slot *slot = gzvm_find_slot_by_addr(addr);
@@ -34,21 +50,9 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
     hwaddr addr = run->mmio.phys_addr;
     MemTxResult r;
 
-    r = address_space_rw(&address_space_memory, addr, MEMTXATTRS_UNSPECIFIED,
-                             run->mmio.data, run->mmio.size, run->mmio.is_write);
-    
-    if (r == MEMTX_OK) {
-        return 0;
-    }
-
-    /* 
-     * If basic RW fails, we treat this as a device access.
-     * We fallback to a more permissive attribute set to ensure GPU/Device 
-     * registers can be reached.
-     */
     r = address_space_rw(&address_space_memory, addr,
-                          (MemTxAttrs) { .secure = true },
-                          run->mmio.data, run->mmio.size, run->mmio.is_write);
+                         gzvm_mmio_attrs(addr),
+                         run->mmio.data, run->mmio.size, run->mmio.is_write);
     if (r == MEMTX_OK) {
         return 0;
     }

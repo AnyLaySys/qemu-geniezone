@@ -14,9 +14,9 @@ void gzvm_install_sigsegv_handler(void);
 
 /* gzvm-ioctl.c */
 int gzvm_dev_ioctl(GZVMState *s, int type, void *arg);
+void gzvm_ioctl_set_state(GZVMState *s);
 
 /* gzvm-vcpu.c */
-int gzvm_detect_exit_reason(struct gzvm_vcpu_run *run);
 void gzvm_cpu_kick_self(void);
 void gzvm_init_cpu_signals(void);
 

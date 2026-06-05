@@ -29,7 +29,7 @@ void gzvm_start_vm(void)
         if (ret < 0) {
             error_report("GZVM_ENABLE_CAP PROTECTED_VM failed: %s (errno=%d)",
                          strerror(errno), errno);
-            exit(1);
+            return;
         }
     }
 
@@ -39,9 +39,9 @@ void gzvm_start_vm(void)
         dtb.dtb_size = s->dtb_size;
         ret = gzvm_vm_ioctl(GZVM_SET_DTB_CONFIG, &dtb);
         if (ret != 0) {
-            error_report("gzvm: GZVM_SET_DTB_CONFIG failed: %s (errno=%d) — aborting",
+            error_report("gzvm: GZVM_SET_DTB_CONFIG failed: %s (errno=%d)",
                          strerror(errno), errno);
-            exit(1);
+            return;
         }
     }
 

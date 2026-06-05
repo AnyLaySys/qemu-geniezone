@@ -15,31 +15,66 @@
 #define gzvm_slots_lock(s)    qemu_mutex_lock(&s->slots_lock)
 #define gzvm_slots_unlock(s)  qemu_mutex_unlock(&s->slots_lock)
 
+/*
+ * Binary-search sorted_ids[] for the first slot whose start >= addr.
+ * Returns nr_active_slots if none found.
+ */
+static int gzvm_find_first_ge(GZVMState *s, uint64_t addr)
+{
+    int lo = 0, hi = s->nr_active_slots - 1;
+    int first_ge = s->nr_active_slots;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        gzvm_slot *slot = &s->slots[s->sorted_ids[mid]];
+        if (slot->start >= addr) {
+            first_ge = mid;
+            hi = mid - 1;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    return first_ge;
+}
+
 static gzvm_slot *gzvm_find_overlap_slot(GZVMState *s, uint64_t start, uint64_t size)
 {
-    for (uint32_t i = 0; i < s->nr_slots; i++) {
-        gzvm_slot *slot = &s->slots[i];
-        if (slot->size && start < (slot->start + slot->size) &&
-            (start + size) > slot->start) {
+    uint64_t end = start + size;
+    int first_ge = gzvm_find_first_ge(s, start);
+
+    if (first_ge < (int)s->nr_active_slots) {
+        gzvm_slot *slot = &s->slots[s->sorted_ids[first_ge]];
+        if (slot->start < end) {
             return slot;
         }
     }
+
+    if (first_ge > 0) {
+        gzvm_slot *slot = &s->slots[s->sorted_ids[first_ge - 1]];
+        if (slot->start + slot->size > start) {
+            return slot;
+        }
+    }
+
     return NULL;
 }
 
 gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
 {
     GZVMState *s = GZVM_STATE(current_accel());
-    if (!s->nr_slots) {
+
+    if (!s->nr_active_slots) {
         return NULL;
     }
 
-    for (uint32_t i = 0; i < s->nr_slots; i++) {
-        gzvm_slot *slot = &s->slots[i];
-        if (!slot->size) {
-            continue;
-        }
-        if (addr >= slot->start && (addr - slot->start) < slot->size) {
+    int lo = 0, hi = s->nr_active_slots - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        gzvm_slot *slot = &s->slots[s->sorted_ids[mid]];
+        if (addr < slot->start) {
+            hi = mid - 1;
+        } else if (addr >= slot->start + slot->size) {
+            lo = mid + 1;
+        } else {
             return slot;
         }
     }
@@ -48,12 +83,7 @@ gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
 
 static gzvm_slot *gzvm_get_free_slot(GZVMState *s)
 {
-    if (s->free_slots) {
-        guint slot_id = GPOINTER_TO_UINT(s->free_slots->data);
-        s->free_slots = g_list_delete_link(s->free_slots, s->free_slots);
-        return &s->slots[slot_id];
-    }
-    for (guint i = 0; i < s->nr_slots; i++) {
+    for (guint i = 0; i < GZVM_MAX_MEM_SLOTS; i++) {
         if (s->slots[i].size == 0) {
             return &s->slots[i];
         }
@@ -72,7 +102,7 @@ gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
     slot = gzvm_get_free_slot(s);
     if (!slot) {
         error_report("gzvm: No free memory slots available!");
-        exit(1);
+        return;
     }
 
     slot->size = size;
@@ -90,8 +120,21 @@ gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
     if (ret) {
         error_report("GZVM_SET_USER_MEMORY_REGION FAILED: %s (errno=%d)",
                      strerror(errno), errno);
-        exit(1);
+        return;
     }
+
+    /* Insert slot->id into sorted_ids, maintaining address order */
+    int ins_pos = 0;
+    while (ins_pos < (int)s->nr_active_slots &&
+           s->slots[s->sorted_ids[ins_pos]].start < gpa) {
+        ins_pos++;
+    }
+    if (ins_pos < (int)s->nr_active_slots) {
+        memmove(&s->sorted_ids[ins_pos + 1], &s->sorted_ids[ins_pos],
+                (s->nr_active_slots - ins_pos) * sizeof(gint));
+    }
+    s->sorted_ids[ins_pos] = slot->id;
+    s->nr_active_slots++;
 }
 
 static void
@@ -127,8 +170,18 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
             };
             gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
             slot->size = 0;
-            s->free_slots = g_list_prepend(s->free_slots,
-                                           GUINT_TO_POINTER(slot->id));
+            /* Remove slot->id from sorted_ids */
+            int pos;
+            for (pos = 0; pos < (int)s->nr_active_slots; pos++) {
+                if (s->sorted_ids[pos] == slot->id) {
+                    break;
+                }
+            }
+            if (pos < (int)s->nr_active_slots) {
+                memmove(&s->sorted_ids[pos], &s->sorted_ids[pos + 1],
+                        (s->nr_active_slots - pos - 1) * sizeof(gint));
+                s->nr_active_slots--;
+            }
         }
         gzvm_slots_unlock(s);
         return;
@@ -169,8 +222,19 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
         };
         gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
         slot->size = 0;
-        s->free_slots = g_list_prepend(s->free_slots,
-                                       GUINT_TO_POINTER(slot->id));
+        {
+            int pos;
+            for (pos = 0; pos < (int)s->nr_active_slots; pos++) {
+                if (s->sorted_ids[pos] == slot->id) {
+                    break;
+                }
+            }
+            if (pos < (int)s->nr_active_slots) {
+                memmove(&s->sorted_ids[pos], &s->sorted_ids[pos + 1],
+                        (s->nr_active_slots - pos - 1) * sizeof(gint));
+                s->nr_active_slots--;
+            }
+        }
     }
 
     if (s->protected_vm && (area->readonly || area->rom_device)) {
@@ -211,14 +275,14 @@ int gzvm_create_vm(void)
     s->fd = qemu_open_old("/dev/gzvm", O_RDWR);
     if (s->fd == -1) {
         error_report("Could not access /dev/gzvm: %s", strerror(errno));
-        exit(1);
+        return -1;
     }
 
     ret = gzvm_dev_ioctl(s, GZVM_CREATE_VM, NULL);
     if (ret < 0) {
         error_report("GZVM_CREATE_VM failed: %s (errno=%d)",
                      strerror(errno), errno);
-        exit(1);
+        return -1;
     }
     s->vmfd = ret;
 
@@ -250,12 +314,11 @@ int gzvm_create_vm(void)
         }
     }
 
+    s->slots = g_new0(gzvm_slot, GZVM_MAX_MEM_SLOTS);
+    s->sorted_ids = g_new0(gint, GZVM_MAX_MEM_SLOTS);
     qemu_mutex_init(&s->slots_lock);
-    s->free_slots = NULL;
-    s->nr_slots = GZVM_MAX_MEM_SLOTS;
-    for (int i = 0; i < s->nr_slots; ++i) {
-        s->slots[i].start = 0;
-        s->slots[i].size = 0;
+    s->nr_active_slots = 0;
+    for (int i = 0; i < GZVM_MAX_MEM_SLOTS; ++i) {
         s->slots[i].id = i;
     }
 
@@ -273,7 +336,7 @@ int gzvm_create_vm(void)
         if (ret) {
             error_report("gzvm: GZVM_CREATE_DEVICE VGIC_DIST failed: %s (errno=%d)",
                          strerror(errno), errno);
-            exit(1);
+            return -1;
         }
         s->gic_dist_base = 0x08000000ULL;
     }
@@ -288,7 +351,7 @@ int gzvm_create_vm(void)
         if (ret) {
             error_report("gzvm: GZVM_CREATE_DEVICE VGIC_REDIST failed: %s (errno=%d)",
                          strerror(errno), errno);
-            exit(1);
+            return -1;
         }
         s->gic_redist_base = 0x080A0000ULL;
     }

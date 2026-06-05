@@ -61,10 +61,6 @@ static int gzvm_cpu_exec(CPUState *cpu)
         return -1;
     }
 
-    if (!run->exit_reason) {
-        run->exit_reason = gzvm_detect_exit_reason(run);
-    }
-
     switch (run->exit_reason) {
     case GZVM_EXIT_MMIO: {
         return gzvm_handle_mmio_exit(cpu, run);
