@@ -386,6 +386,32 @@ static int gic_fdt_irq_type_spi(const VirtMachineState *vms)
         GICV5_SPI : GIC_FDT_IRQ_TYPE_SPI;
 }
 
+static void create_gzvm_restricted_dma_pool(VirtMachineState *vms)
+{
+    MachineState *ms = MACHINE(vms);
+    hwaddr size = 128 * MiB;
+    hwaddr base;
+    char *nodename;
+
+    if (!gzvm_enabled() || ms->ram_size <= size) {
+        return;
+    }
+
+    base = vms->memmap[VIRT_MEM].base + ms->ram_size - size;
+    vms->restricted_dma_phandle = qemu_fdt_alloc_phandle(ms->fdt);
+    qemu_fdt_add_subnode(ms->fdt, "/reserved-memory");
+    qemu_fdt_setprop_cell(ms->fdt, "/reserved-memory", "#address-cells", 2);
+    qemu_fdt_setprop_cell(ms->fdt, "/reserved-memory", "#size-cells", 2);
+    qemu_fdt_setprop(ms->fdt, "/reserved-memory", "ranges", NULL, 0);
+
+    nodename = g_strdup_printf("/reserved-memory/restricted-dma-pool@%" PRIx64, base);
+    qemu_fdt_add_subnode(ms->fdt, nodename);
+    qemu_fdt_setprop_string(ms->fdt, nodename, "compatible", "restricted-dma-pool");
+    qemu_fdt_setprop_sized_cells(ms->fdt, nodename, "reg", 2, base, 2, size);
+    qemu_fdt_setprop_cell(ms->fdt, nodename, "phandle", vms->restricted_dma_phandle);
+    g_free(nodename);
+}
+
 static void create_fdt(VirtMachineState *vms)
 {
     MachineState *ms = MACHINE(vms);
@@ -430,6 +456,7 @@ static void create_fdt(VirtMachineState *vms)
     }
 
     qemu_fdt_add_subnode(fdt, "/aliases");
+    create_gzvm_restricted_dma_pool(vms);
 
     /* Clock node, for the benefit of the UART. The kernel device tree
      * binding documentation claims the PL011 node clock properties are
@@ -2209,6 +2236,10 @@ static void create_pcie(VirtMachineState *vms)
     qemu_fdt_setprop_cells(ms->fdt, nodename, "bus-range", 0,
                            nr_pcie_buses - 1);
     qemu_fdt_setprop(ms->fdt, nodename, "dma-coherent", NULL, 0);
+    if (vms->restricted_dma_phandle) {
+        qemu_fdt_setprop_cell(ms->fdt, nodename, "memory-region",
+                              vms->restricted_dma_phandle);
+    }
 
     if (vms->msi_phandle) {
         qemu_fdt_setprop_cells(ms->fdt, nodename, "msi-map",
