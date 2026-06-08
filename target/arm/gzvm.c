@@ -45,16 +45,10 @@ static const char * const gzvm_id_reg_names[NUM_ID_IDX] = {
 
 static int gzvm_set_one_reg(CPUState *cs, uint64_t id, void *source);
 
-static bool gzvm_id_regs_written;
-
 static void gzvm_arch_set_id_regs(CPUState *cs)
 {
     ARMCPU *cpu = ARM_CPU(cs);
     int i;
-
-    if (gzvm_id_regs_written) {
-        return;
-    }
 
     for (i = 0; i < NUM_ID_IDX; i++) {
         uint64_t reg = cpu->isar.idregs[i];
@@ -67,7 +61,6 @@ static void gzvm_arch_set_id_regs(CPUState *cs)
                 (id_register_sysreg[i] & 0x3fff);
         gzvm_set_one_reg(cs, sysid, &reg);
     }
-    gzvm_id_regs_written = true;
 }
 
 static int gzvm_set_one_reg(CPUState *cs, uint64_t id, void *source)
@@ -198,11 +191,6 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     int i;
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
-
-    if (cs->cpu_index != 0) {
-        val = pstate_read(env);
-        return gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
-    }
 
     gzvm_arch_set_id_regs(cs);
 
