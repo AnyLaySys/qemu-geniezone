@@ -2440,6 +2440,11 @@ void virt_machine_done(Notifier *notifier, void *data)
     }
     if (gzvm_enabled()) {
         gzvm_arm_set_dtb(info->dtb_start, dtb_size);
+        void *dtb_data = rom_ptr_for_as(as, info->dtb_start, dtb_size);
+        if (dtb_data) {
+            fw_cfg_add_file(vms->fw_cfg, "etc/fdt",
+                            g_memdup2(dtb_data, dtb_size), dtb_size);
+        }
     }
 
     pci_bus_add_fw_cfg_extra_pci_roots(vms->fw_cfg, vms->bus,
