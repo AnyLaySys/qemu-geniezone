@@ -2128,33 +2128,16 @@ static void set_encodings(VncState *vs, int32_t *encodings, size_t n_encodings)
             vs->vnc_encoding = enc;
             break;
         case VNC_ENCODING_TIGHT:
-            vnc_set_feature(vs, VNC_FEATURE_TIGHT);
-            vs->vnc_encoding = enc;
             break;
 #ifdef CONFIG_PNG
         case VNC_ENCODING_TIGHT_PNG:
-            vnc_set_feature(vs, VNC_FEATURE_TIGHT_PNG);
-            vs->vnc_encoding = enc;
             break;
 #endif
         case VNC_ENCODING_ZLIB:
-            /*
-             * VNC_ENCODING_ZRLE compresses better than VNC_ENCODING_ZLIB.
-             * So prioritize ZRLE, even if the client hints that it prefers
-             * ZLIB.
-             */
-            if (!vnc_has_feature(vs, VNC_FEATURE_ZRLE)) {
-                vnc_set_feature(vs, VNC_FEATURE_ZLIB);
-                vs->vnc_encoding = enc;
-            }
             break;
         case VNC_ENCODING_ZRLE:
-            vnc_set_feature(vs, VNC_FEATURE_ZRLE);
-            vs->vnc_encoding = enc;
             break;
         case VNC_ENCODING_ZYWRLE:
-            vnc_set_feature(vs, VNC_FEATURE_ZYWRLE);
-            vs->vnc_encoding = enc;
             break;
         case VNC_ENCODING_DESKTOPRESIZE:
             vnc_set_feature(vs, VNC_FEATURE_RESIZE);
