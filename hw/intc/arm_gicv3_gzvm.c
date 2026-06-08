@@ -30,24 +30,24 @@ static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
 {
     GICv3State *s = ARM_GICV3_COMMON(opaque);
     struct gzvm_irq_level irq_level;
-    uint32_t irq_num;
-    uint32_t type;
+    int irqtype;
+    int cpu;
 
-    /* GPIO layout from gicv3_init_irqs_and_mmio():
-     * [0..N-1] SPIs
-     * [N..N+31] PPIs for CPU 0 (handled in-kernel by hypervisor)
-     * N = num_irq - GIC_INTERNAL
-     */
     if (irq < (int)(s->num_irq - GIC_INTERNAL)) {
-        irq_num = irq;
-        type = GZVM_IRQ_TYPE_SPI;
+        irqtype = GZVM_IRQ_TYPE_SPI;
+        cpu = 0;
+        irq += GIC_INTERNAL;
     } else {
-        warn_report("gzvm: PPI %d dropped (GZVM_IRQ_LINE cannot inject PPIs, "
-                     "handled in-kernel)", irq);
-        return;
+        irqtype = GZVM_IRQ_TYPE_PPI;
+        irq -= s->num_irq - GIC_INTERNAL;
+        cpu = irq / GIC_INTERNAL;
+        irq %= GIC_INTERNAL;
     }
 
-    irq_level.irq = (type << 24) | irq_num;
+    irq_level.irq = (irqtype << GZVM_IRQ_TYPE_SHIFT) |
+                    ((cpu & GZVM_IRQ_VCPU_MASK) << GZVM_IRQ_VCPU_SHIFT) |
+                    (((cpu >> 8) & GZVM_IRQ_VCPU2_MASK) << GZVM_IRQ_VCPU2_SHIFT) |
+                    (irq << GZVM_IRQ_NUM_SHIFT);
     irq_level.level = level;
 
     gzvm_vm_ioctl(GZVM_IRQ_LINE, &irq_level);

@@ -9,16 +9,6 @@ void gzvm_start_vm(void)
     int ret;
     GZVMState *s = GZVM_STATE(current_accel());
 
-    {
-        struct gzvm_enable_cap cap = {
-            .cap = GZVM_CAP_ENABLE_IDLE,
-        };
-        ret = gzvm_vm_ioctl(GZVM_ENABLE_CAP, &cap);
-        if (ret) {
-            error_report("gzvm: GZVM_CAP_ENABLE_IDLE not supported (ret=%d)", ret);
-        }
-    }
-
     if (s->protected_vm) {
         if (s->firmware_size) {
             struct gzvm_enable_cap cap = {
@@ -56,9 +46,4 @@ void gzvm_start_vm(void)
             return;
         }
     }
-
-    /*
-     * Periodic timer via IRQFD is a Linux-KVM-only optimisation;
-     * GenieZone does not support it.  The guest runs fine without it.
-     */
 }
