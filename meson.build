@@ -860,12 +860,6 @@ elif host_os == 'openbsd'
     # Disable OpenBSD W^X if available
     emulator_link_args = cc.get_supported_link_arguments('-Wl,-z,wxneeded')
   endif
-elif host_os == 'android'
-  emulator_link_args = cc.get_supported_link_arguments(
-    '-Wl,--export-dynamic',
-    '-Wl,--undefined=pthread_getaffinity_np',
-    '-Wl,--undefined=pthread_setaffinity_np'
-  )
 endif
 
 ###############################################
@@ -2874,7 +2868,7 @@ config_host_data.set('CONFIG_PTHREAD_CONDATTR_SETCLOCK', cc.links(osdep_prefix +
     pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
     return 0;
   }''', dependencies: threads))
-config_host_data.set('CONFIG_PTHREAD_AFFINITY_NP', host_os != 'android' and cc.links(osdep_prefix + '''
+config_host_data.set('CONFIG_PTHREAD_AFFINITY_NP', cc.links(osdep_prefix + '''
   #include <pthread.h>
 
   static void *f(void *p) { return NULL; }

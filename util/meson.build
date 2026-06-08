@@ -3,9 +3,6 @@ util_ss.add(files('thread-context.c'), numa)
 if host_os != 'windows'
   util_ss.add(files('aio-posix.c'))
   util_ss.add(files('fdmon-poll.c'))
-  if host_os == 'android'
-    util_ss.add(files('android15-pthread-affinity.c'))
-  endif
   if config_host_data.get('CONFIG_EPOLL')
     util_ss.add(files('fdmon-epoll.c'))
   endif
