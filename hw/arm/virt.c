@@ -1891,6 +1891,7 @@ static bool virt_firmware_init(VirtMachineState *vms,
     int i;
     const char *bios_name;
     BlockBackend *pflash_blk0;
+    MachineState *ms = MACHINE(vms);
 
     /* Map legacy -drive if=pflash to machine properties */
     for (i = 0; i < ARRAY_SIZE(vms->flash); i++) {
@@ -1922,8 +1923,18 @@ static bool virt_firmware_init(VirtMachineState *vms,
             error_report("Could not find ROM image '%s'", bios_name);
             exit(1);
         }
-        mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(vms->flash[0]), 0);
-        image_size = load_image_mr(fname, mr);
+        if (gzvm_enabled()) {
+            hwaddr fw_addr = vms->memmap[VIRT_MEM].base;
+            image_size = load_image_targphys_as(fname, fw_addr,
+                                                MIN(ms->ram_size, 4 * MiB),
+                                                &address_space_memory, NULL);
+            if (image_size >= 0) {
+                gzvm_set_firmware(fw_addr, image_size);
+            }
+        } else {
+            mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(vms->flash[0]), 0);
+            image_size = load_image_mr(fname, mr);
+        }
         g_free(fname);
         if (image_size < 0) {
             error_report("Could not load ROM image '%s'", bios_name);
@@ -3244,6 +3255,10 @@ static void machvirt_init(MachineState *machine)
     vms->bootinfo.get_dtb = machvirt_dtb;
     vms->bootinfo.skip_dtb_autoload = true;
     vms->bootinfo.firmware_loaded = firmware_loaded;
+    if (gzvm_enabled() && firmware_loaded) {
+        vms->bootinfo.entry = vms->memmap[VIRT_MEM].base;
+        vms->bootinfo.dtb_start = vms->memmap[VIRT_MEM].base + 4 * MiB;
+    }
     vms->bootinfo.psci_conduit = vms->psci_conduit;
     arm_load_kernel(ARM_CPU(first_cpu), machine, &vms->bootinfo);
 

@@ -1127,7 +1127,7 @@ static void arm_setup_firmware_boot(ARMCPU *cpu, struct arm_boot_info *info)
 {
     /* Set up for booting firmware (which might load a kernel via fw_cfg) */
 
-    if (have_dtb(info)) {
+    if (have_dtb(info) && !(gzvm_enabled() && info->dtb_start)) {
         /*
          * If we have a device tree blob, but no kernel to supply it to (or
          * the kernel is supposed to be loaded by the bootloader), copy the

@@ -149,6 +149,18 @@ gzvm_add_mem(GZVMState *s, MemoryRegionSection *section, uint32_t flags)
     gzvm_add_mem_slot(s, base_hva, base_gpa, total_size, flags);
 }
 
+static void
+gzvm_add_mem_range(GZVMState *s, MemoryRegionSection *section,
+                   uint64_t gpa, uint64_t size, uint32_t flags)
+{
+    MemoryRegion *area = section->mr;
+    uint64_t offset = gpa - section->offset_within_address_space;
+    uint8_t *hva = memory_region_get_ram_ptr(area) +
+                   section->offset_within_region + offset;
+
+    gzvm_add_mem_slot(s, hva, gpa, size, flags);
+}
+
 static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool add)
 {
     MemoryRegion *area = section->mr;
@@ -232,6 +244,35 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
 
     if (s->protected_vm && (area->readonly || area->rom_device)) {
         flags = GZVM_USER_MEM_REGION_PROTECT_FW;
+    }
+
+    if (s->protected_vm && s->firmware_size &&
+        !area->readonly && !area->rom_device) {
+        uint64_t section_start = section->offset_within_address_space;
+        uint64_t section_size = int128_get64(section->size);
+        uint64_t section_end = section_start + section_size;
+        uint64_t fw_start = QEMU_ALIGN_DOWN(s->firmware_start, page_size);
+        uint64_t fw_end = QEMU_ALIGN_UP(s->firmware_start + s->firmware_size,
+                                        page_size);
+
+        if (fw_start < section_end && fw_end > section_start) {
+            uint64_t protect_start = MAX(fw_start, section_start);
+            uint64_t protect_end = MIN(fw_end, section_end);
+
+            if (protect_start > section_start) {
+                gzvm_add_mem_range(s, section, section_start,
+                                   protect_start - section_start, flags);
+            }
+            gzvm_add_mem_range(s, section, protect_start,
+                               protect_end - protect_start,
+                               GZVM_USER_MEM_REGION_PROTECT_FW);
+            if (protect_end < section_end) {
+                gzvm_add_mem_range(s, section, protect_end,
+                                   section_end - protect_end, flags);
+            }
+            gzvm_slots_unlock(s);
+            return;
+        }
     }
 
     gzvm_add_mem(s, section, flags);

@@ -16,6 +16,7 @@ extern bool gzvm_allowed;
 #define gzvm_enabled() (gzvm_allowed)
 
 int gzvm_arm_set_dtb(uint64_t dtb_start, uint64_t dtb_size);
+void gzvm_set_firmware(uint64_t start, uint64_t size);
 void gzvm_set_gic_bases(uint64_t dist_base, uint64_t redist_base,
                         uint64_t redist_size);
 void gzvm_set_ram_base(uint64_t base);
