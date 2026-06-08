@@ -90,6 +90,7 @@ static bool irb_error(Irb *irb)
 static void print_eckd_dasd_sense_data(SenseDataEckdDasd *sd)
 {
     char msgline[512];
+    int n;
 
     if (sd->config_info & 0x8000) {
         puts("Eckd Dasd Sense Data (fmt 24-bytes):");
@@ -97,68 +98,68 @@ static void print_eckd_dasd_sense_data(SenseDataEckdDasd *sd)
         puts("Eckd Dasd Sense Data (fmt 32-bytes):");
     }
 
-    strcat(msgline, "    Sense Condition Flags :");
+    n = snprintf(msgline, sizeof(msgline), "    Sense Condition Flags :");
     if (sd->common_status & SNS_STAT0_CMD_REJECT) {
-        strcat(msgline, " [Cmd-Reject]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Cmd-Reject]");
     }
     if (sd->common_status & SNS_STAT0_INTERVENTION_REQ) {
-        strcat(msgline, " [Intervention-Required]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Intervention-Required]");
     }
     if (sd->common_status & SNS_STAT0_BUS_OUT_CHECK) {
-        strcat(msgline, " [Bus-Out-Parity-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Bus-Out-Parity-Check]");
     }
     if (sd->common_status & SNS_STAT0_EQUIPMENT_CHECK) {
-        strcat(msgline, " [Equipment-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Equipment-Check]");
     }
     if (sd->common_status & SNS_STAT0_DATA_CHECK) {
-        strcat(msgline, " [Data-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Data-Check]");
     }
     if (sd->common_status & SNS_STAT0_OVERRUN) {
-        strcat(msgline, " [Overrun]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Overrun]");
     }
     if (sd->common_status & SNS_STAT0_INCOMPL_DOMAIN) {
-        strcat(msgline, " [Incomplete-Domain]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Incomplete-Domain]");
     }
 
     if (sd->status[0] & SNS_STAT1_PERM_ERR) {
-        strcat(msgline, " [Permanent-Error]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Permanent-Error]");
     }
     if (sd->status[0] & SNS_STAT1_INV_TRACK_FORMAT) {
-        strcat(msgline, " [Invalid-Track-Fmt]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Invalid-Track-Fmt]");
     }
     if (sd->status[0] & SNS_STAT1_EOC) {
-        strcat(msgline, " [End-of-Cyl]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [End-of-Cyl]");
     }
     if (sd->status[0] & SNS_STAT1_MESSAGE_TO_OPER) {
-        strcat(msgline, " [Operator-Msg]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Operator-Msg]");
     }
     if (sd->status[0] & SNS_STAT1_NO_REC_FOUND) {
-        strcat(msgline, " [No-Record-Found]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [No-Record-Found]");
     }
     if (sd->status[0] & SNS_STAT1_FILE_PROTECTED) {
-        strcat(msgline, " [File-Protected]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [File-Protected]");
     }
     if (sd->status[0] & SNS_STAT1_WRITE_INHIBITED) {
-        strcat(msgline, " [Write-Inhibited]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Write-Inhibited]");
     }
     if (sd->status[0] & SNS_STAT1_IMPRECISE_END) {
-        strcat(msgline, " [Imprecise-Ending]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Imprecise-Ending]");
     }
 
     if (sd->status[1] & SNS_STAT2_REQ_INH_WRITE) {
-        strcat(msgline, " [Req-Inhibit-Write]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Req-Inhibit-Write]");
     }
     if (sd->status[1] & SNS_STAT2_CORRECTABLE) {
-        strcat(msgline, " [Correctable-Data-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Correctable-Data-Check]");
     }
     if (sd->status[1] & SNS_STAT2_FIRST_LOG_ERR) {
-        strcat(msgline, " [First-Error-Log]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [First-Error-Log]");
     }
     if (sd->status[1] & SNS_STAT2_ENV_DATA_PRESENT) {
-        strcat(msgline, " [Env-Data-Present]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Env-Data-Present]");
     }
     if (sd->status[1] & SNS_STAT2_IMPRECISE_END) {
-        strcat(msgline, " [Imprecise-End]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Imprecise-End]");
     }
     puts(msgline);
 
@@ -182,118 +183,115 @@ static void print_irb_err(Irb *irb)
     uint64_t this_ccw = *(uint64_t *)u32toptr(irb->scsw.cpa);
     uint64_t prev_ccw = *(uint64_t *)u32toptr(irb->scsw.cpa - 8);
     char msgline[256];
+    int n;
 
     puts("Interrupt Response Block Data:");
 
-    strcat(msgline, "    Function Ctrl :");
+    n = snprintf(msgline, sizeof(msgline), "    Function Ctrl :");
     if (irb->scsw.ctrl & SCSW_FCTL_START_FUNC) {
-        strcat(msgline, " [Start]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Start]");
     }
     if (irb->scsw.ctrl & SCSW_FCTL_HALT_FUNC) {
-        strcat(msgline, " [Halt]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Halt]");
     }
     if (irb->scsw.ctrl & SCSW_FCTL_CLEAR_FUNC) {
-        strcat(msgline, " [Clear]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Clear]");
     }
     puts(msgline);
 
-    msgline[0] = '\0';
-    strcat(msgline, "    Activity Ctrl :");
+    n = snprintf(msgline, sizeof(msgline), "    Activity Ctrl :");
     if (irb->scsw.ctrl & SCSW_ACTL_RESUME_PEND) {
-        strcat(msgline, " [Resume-Pending]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Resume-Pending]");
     }
     if (irb->scsw.ctrl & SCSW_ACTL_START_PEND) {
-        strcat(msgline, " [Start-Pending]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Start-Pending]");
     }
     if (irb->scsw.ctrl & SCSW_ACTL_HALT_PEND) {
-        strcat(msgline, " [Halt-Pending]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Halt-Pending]");
     }
     if (irb->scsw.ctrl & SCSW_ACTL_CLEAR_PEND) {
-        strcat(msgline, " [Clear-Pending]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Clear-Pending]");
     }
     if (irb->scsw.ctrl & SCSW_ACTL_CH_ACTIVE) {
-        strcat(msgline, " [Channel-Active]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Channel-Active]");
     }
     if (irb->scsw.ctrl & SCSW_ACTL_DEV_ACTIVE) {
-        strcat(msgline, " [Device-Active]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Device-Active]");
     }
     if (irb->scsw.ctrl & SCSW_ACTL_SUSPENDED) {
-        strcat(msgline, " [Suspended]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Suspended]");
     }
     puts(msgline);
 
-    msgline[0] = '\0';
-    strcat(msgline, "    Status Ctrl :");
+    n = snprintf(msgline, sizeof(msgline), "    Status Ctrl :");
     if (irb->scsw.ctrl & SCSW_SCTL_ALERT) {
-        strcat(msgline, " [Alert]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Alert]");
     }
     if (irb->scsw.ctrl & SCSW_SCTL_INTERMED) {
-        strcat(msgline, " [Intermediate]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Intermediate]");
     }
     if (irb->scsw.ctrl & SCSW_SCTL_PRIMARY) {
-        strcat(msgline, " [Primary]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Primary]");
     }
     if (irb->scsw.ctrl & SCSW_SCTL_SECONDARY) {
-        strcat(msgline, " [Secondary]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Secondary]");
     }
     if (irb->scsw.ctrl & SCSW_SCTL_STATUS_PEND) {
-        strcat(msgline, " [Status-Pending]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Status-Pending]");
     }
     puts(msgline);
 
-    msgline[0] = '\0';
-    strcat(msgline, "    Device Status :");
+    n = snprintf(msgline, sizeof(msgline), "    Device Status :");
     if (irb->scsw.dstat & SCSW_DSTAT_ATTN) {
-        strcat(msgline, " [Attention]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Attention]");
     }
     if (irb->scsw.dstat & SCSW_DSTAT_STATMOD) {
-        strcat(msgline, " [Status-Modifier]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Status-Modifier]");
     }
     if (irb->scsw.dstat & SCSW_DSTAT_CUEND) {
-        strcat(msgline, " [Ctrl-Unit-End]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Ctrl-Unit-End]");
     }
     if (irb->scsw.dstat & SCSW_DSTAT_BUSY) {
-        strcat(msgline, " [Busy]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Busy]");
     }
     if (irb->scsw.dstat & SCSW_DSTAT_CHEND) {
-        strcat(msgline, " [Channel-End]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Channel-End]");
     }
     if (irb->scsw.dstat & SCSW_DSTAT_DEVEND) {
-        strcat(msgline, " [Device-End]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Device-End]");
     }
     if (irb->scsw.dstat & SCSW_DSTAT_UCHK) {
-        strcat(msgline, " [Unit-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Unit-Check]");
     }
     if (irb->scsw.dstat & SCSW_DSTAT_UEXCP) {
-        strcat(msgline, " [Unit-Exception]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Unit-Exception]");
     }
     puts(msgline);
 
-    msgline[0] = '\0';
-    strcat(msgline, "    Channel Status :");
+    n = snprintf(msgline, sizeof(msgline), "    Channel Status :");
     if (irb->scsw.cstat & SCSW_CSTAT_PCINT) {
-        strcat(msgline, " [Program-Ctrl-Interruption]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Program-Ctrl-Interruption]");
     }
     if (irb->scsw.cstat & SCSW_CSTAT_BADLEN) {
-        strcat(msgline, " [Incorrect-Length]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Incorrect-Length]");
     }
     if (irb->scsw.cstat & SCSW_CSTAT_PROGCHK) {
-        strcat(msgline, " [Program-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Program-Check]");
     }
     if (irb->scsw.cstat & SCSW_CSTAT_PROTCHK) {
-        strcat(msgline, " [Protection-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Protection-Check]");
     }
     if (irb->scsw.cstat & SCSW_CSTAT_CHDCHK) {
-        strcat(msgline, " [Channel-Data-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Channel-Data-Check]");
     }
     if (irb->scsw.cstat & SCSW_CSTAT_CHCCHK) {
-        strcat(msgline, " [Channel-Ctrl-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Channel-Ctrl-Check]");
     }
     if (irb->scsw.cstat & SCSW_CSTAT_ICCHK) {
-        strcat(msgline, " [Interface-Ctrl-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Interface-Ctrl-Check]");
     }
     if (irb->scsw.cstat & SCSW_CSTAT_CHAINCHK) {
-        strcat(msgline, " [Chaining-Check]");
+        n += snprintf(msgline + n, sizeof(msgline) - n, " [Chaining-Check]");
     }
     puts(msgline);
 
