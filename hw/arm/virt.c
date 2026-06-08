@@ -1999,11 +1999,11 @@ static void create_pcie_irq_map(const MachineState *ms,
                                 int first_irq, const char *nodename)
 {
     int devfn, pin;
-    uint32_t full_irq_map[4 * 4 * 10] = { 0 };
+    uint32_t full_irq_map[PCI_SLOT_MAX * PCI_NUM_PINS * 10] = { 0 };
     uint32_t *irq_map = full_irq_map;
     const VirtMachineState *vms = VIRT_MACHINE(ms);
 
-    for (devfn = 0; devfn <= 0x18; devfn += 0x8) {
+    for (devfn = 0; devfn <= PCI_DEVFN(PCI_SLOT_MAX - 1, 0); devfn += 0x8) {
         for (pin = 0; pin < 4; pin++) {
             int irq_type = gic_fdt_irq_type_spi(vms);
             int irq_nr = first_irq + ((pin + PCI_SLOT(devfn)) % PCI_NUM_PINS);
@@ -2027,7 +2027,7 @@ static void create_pcie_irq_map(const MachineState *ms,
                      full_irq_map, sizeof(full_irq_map));
 
     qemu_fdt_setprop_cells(ms->fdt, nodename, "interrupt-map-mask",
-                           cpu_to_be16(PCI_DEVFN(3, 0)), /* Slot 3 */
+                           cpu_to_be16(PCI_DEVFN(PCI_SLOT_MAX - 1, 0)),
                            0, 0,
                            0x7           /* PCI irq */);
 }
@@ -2771,7 +2771,7 @@ static void finalize_msi_controller(VirtMachineState *vms)
         }  else if (hvf_enabled() && hvf_irqchip_in_kernel()) {
             vms->msi_controller = VIRT_MSI_CTRL_GICV2M;
         } else if (gzvm_enabled()) {
-            vms->msi_controller = VIRT_MSI_CTRL_GICV2M;
+            vms->msi_controller = VIRT_MSI_CTRL_NONE;
         } else if (vms->gic_version == VIRT_GIC_VERSION_5) {
             /* GICv5 ITS is not yet implemented */
             vms->msi_controller = VIRT_MSI_CTRL_NONE;
@@ -2806,6 +2806,10 @@ static void finalize_msi_controller(VirtMachineState *vms)
             error_report("ITS not supported on GZVM.");
             exit(1);
         }
+    }
+    if (vms->msi_controller == VIRT_MSI_CTRL_GICV2M && gzvm_enabled()) {
+        error_report("GICv2M not supported on GZVM.");
+        exit(1);
     }
 
     assert(vms->msi_controller != VIRT_MSI_CTRL_AUTO);
