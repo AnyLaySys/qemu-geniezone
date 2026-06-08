@@ -67,7 +67,6 @@ static void gzvm_accel_instance_init(Object *obj)
     s->fd = -1;
     s->vmfd = -1;
     s->protected_vm = false;
-    s->irqfd_timer_fd = -1;
     s->slots = NULL;
     s->sorted_ids = NULL;
     object_property_add_bool(obj, "protected",

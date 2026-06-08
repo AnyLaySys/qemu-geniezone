@@ -3183,6 +3183,11 @@ static void machvirt_init(MachineState *machine)
 
     vms->highmem_ecam &= (!firmware_loaded || aarch64);
 
+    if (gzvm_enabled()) {
+        vms->highmem_ecam = false;
+        vms->highmem_mmio = false;
+    }
+
     create_rtc(vms);
 
     create_pcie(vms);

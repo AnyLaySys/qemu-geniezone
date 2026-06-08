@@ -189,13 +189,6 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
 
     if (!memory_region_is_ram(area) && !memory_region_is_rom(area) &&
         !memory_region_is_romd(area)) {
-        /* 
-         * For MMIO regions, we don't map them as Guest RAM, but we still 
-         * need to register them to ensure the GZVM hypervisor knows 
-         * these ranges are valid for the VM.
-         */
-        gzvm_add_mem_slot(s, NULL, section->offset_within_address_space, 
-                          int128_get64(section->size), 0);
         return;
     }
 

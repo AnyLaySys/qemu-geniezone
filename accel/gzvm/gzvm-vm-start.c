@@ -1,5 +1,4 @@
 #include "qemu/osdep.h"
-#include <sys/timerfd.h>
 #include "qemu/error-report.h"
 #include "system/gzvm.h"
 #include "system/gzvm_int.h"
@@ -45,43 +44,8 @@ void gzvm_start_vm(void)
         }
     }
 
-    /* Set up periodic timer via IRQFD to wake VCPU from WFI */
-    {
-        int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
-        struct gzvm_irqfd irqfd;
-
-        if (timer_fd < 0) {
-            warn_report("gzvm: timerfd_create failed (errno=%d); "
-                        "timer wakeup disabled", errno);
-            return;
-        }
-
-        struct itimerspec ts = {
-            .it_interval = { .tv_sec = 0, .tv_nsec = 5000000 },
-            .it_value = { .tv_sec = 0, .tv_nsec = 1000000 },
-        };
-
-        timerfd_settime(timer_fd, 0, &ts, NULL);
-
-        /* Try raw PPI number as GSI */
-        irqfd = (struct gzvm_irqfd){
-            .fd = timer_fd,
-            .gsi = 27,
-        };
-        ret = gzvm_vm_ioctl(GZVM_IRQFD, &irqfd);
-        if (ret) {
-            /* Try GSI=0 (CPU IRQ line) */
-            irqfd.gsi = 0;
-            ret = gzvm_vm_ioctl(GZVM_IRQFD, &irqfd);
-        }
-        if (ret) {
-            warn_report("gzvm: GZVM_IRQFD not supported (errno=%d); "
-                        "timer wakeup disabled", errno);
-            close(timer_fd);
-            s->irqfd_timer_fd = -1;
-        } else {
-            warn_report("gzvm: IRQFD timer set up on GSI=%d", irqfd.gsi);
-            s->irqfd_timer_fd = timer_fd;
-        }
-    }
+    /*
+     * Periodic timer via IRQFD is a Linux-KVM-only optimisation;
+     * GenieZone does not support it.  The guest runs fine without it.
+     */
 }

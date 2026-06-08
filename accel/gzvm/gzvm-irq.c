@@ -60,16 +60,8 @@ gzvm_mem_ioeventfd_add(MemoryListener *listener, MemoryRegionSection *section,
                                  int128_get64(section->size), data,
                                  match_data, true);
     if (r < 0 && errno == EEXIST) {
-        r = gzvm_set_ioeventfd_mmio(fd, section->offset_within_address_space,
-                                    int128_get64(section->size), data,
-                                    match_data, false);
-        if (r < 0) {
-            error_report("gzvm: ioeventfd_deassign failed addr=0x%" PRIx64 ": %s",
-                         (uint64_t)section->offset_within_address_space, strerror(errno));
-        }
-        r = gzvm_set_ioeventfd_mmio(fd, section->offset_within_address_space,
-                                      int128_get64(section->size), data,
-                                      match_data, true);
+        /* Already registered with the same parameters; nothing to do */
+        return;
     }
     if (r < 0) {
         error_report("gzvm: ioeventfd_add failed addr=0x%" PRIx64 ": %s",

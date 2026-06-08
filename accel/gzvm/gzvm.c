@@ -106,9 +106,10 @@ static int gzvm_cpu_exec(CPUState *cpu)
 static void do_gzvm_cpu_synchronize_post_reset(CPUState *cpu,
                                                run_on_cpu_data arg)
 {
-    if (gzvm_arch_put_registers(cpu, 0)) {
-        cpu_dump_state(cpu, stderr, CPU_DUMP_CODE);
-        vm_stop(RUN_STATE_INTERNAL_ERROR);
+    int ret = gzvm_arch_put_registers(cpu, 0);
+    if (ret) {
+        warn_report("gzvm: VCPU%u put_registers failed with %d",
+                    cpu->cpu_index, ret);
     }
 }
 
@@ -150,7 +151,7 @@ void *gzvm_cpu_thread_fn(void *arg)
             if (ret == EXCP_DEBUG) {
                 cpu_handle_guest_debug(cpu);
             } else if (ret < 0) {
-                cpu_dump_state(cpu, stderr, CPU_DUMP_CODE);
+                error_report("gzvm: VCPU%u run error ret=%d", cpu->cpu_index, ret);
                 vm_stop(RUN_STATE_INTERNAL_ERROR);
             }
         }

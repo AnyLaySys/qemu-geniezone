@@ -188,7 +188,7 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
 {
     uint64_t val;
     uint32_t fpr;
-    int i, ret;
+    int i;
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
 
@@ -204,45 +204,27 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     }
 
     for (i = 0; i < 31; i++) {
-        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(i)),
-                                &env->xregs[i]);
-        if (ret) {
-            return ret;
-        }
+        gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(i)),
+                          &env->xregs[i]);
     }
 
     aarch64_save_sp(env, 1);
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP),
-                            &env->sp_el[0]);
-    if (ret) {
-        return ret;
-    }
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP_EL1),
-                            &env->sp_el[1]);
-    if (ret) {
-        return ret;
-    }
+    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP),
+                      &env->sp_el[0]);
+    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP_EL1),
+                      &env->sp_el[1]);
 
     if (is_a64(env)) {
         val = pstate_read(env);
     } else {
         val = cpsr_read(env);
     }
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
-    if (ret) {
-        return ret;
-    }
+    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
 
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &env->pc);
-    if (ret) {
-        return ret;
-    }
+    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &env->pc);
 
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_ELR_EL1),
-                            &env->elr_el[1]);
-    if (ret) {
-        return ret;
-    }
+    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_ELR_EL1),
+                      &env->elr_el[1]);
 
     {
         unsigned int el = arm_current_el(env);
@@ -252,40 +234,22 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
         }
     }
     for (i = 0; i < GZVM_NR_SPSR; i++) {
-        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SPSR(i)),
-                                &env->banked_spsr[i + 1]);
-        if (ret) {
-            return ret;
-        }
+        gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SPSR(i)),
+                          &env->banked_spsr[i + 1]);
     }
 
-    ret = gzvm_arch_put_fpsimd(cs);
-    if (ret) {
-        return ret;
-    }
+    gzvm_arch_put_fpsimd(cs);
 
     fpr = vfp_get_fpsr(env);
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPSR), &fpr);
-    if (ret) {
-        return ret;
-    }
+    gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPSR), &fpr);
     fpr = vfp_get_fpcr(env);
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPCR), &fpr);
-    if (ret) {
-        return ret;
-    }
+    gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPCR), &fpr);
 
     {
         uint64_t val64 = UINT64_MAX;
-        ret = gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 0, 2), &val64);
-        if (ret) {
-            return ret;
-        }
+        gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 0, 2), &val64);
         val64 = 0;
-        ret = gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 3, 1), &val64);
-        if (ret) {
-            return ret;
-        }
+        gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 3, 1), &val64);
     }
 
     return 0;

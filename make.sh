@@ -4,14 +4,20 @@ cd "$(dirname "$0")"
 
 DEBUG=0
 ASAN=0
+CLEAN=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --debug) DEBUG=1 ;;
         --asan)  ASAN=1  ;;
-        *) echo "Usage: $0 [--debug] [--asan]"; exit 1 ;;
+        --clean) CLEAN=1 ;;
+        *) echo "Usage: $0 [--debug] [--asan] [--clean]"; exit 1 ;;
     esac
     shift
 done
+
+if [ "$CLEAN" = 1 ]; then
+    rm -rf build
+fi
 
 mkdir -p build
 cd build

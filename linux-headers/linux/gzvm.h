@@ -80,7 +80,7 @@ SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 #define GZVM_REG_ARM64_SYSREG_OP2_SHIFT	   0
 
 #define GZVM_CREATE_VM             _IO(GZVM_IOC_MAGIC,   0x01)
-#define GZVM_CHECK_EXTENSION       _IOWR(GZVM_IOC_MAGIC, 0x03, __u64)
+#define GZVM_CHECK_EXTENSION       _IO(GZVM_IOC_MAGIC,   0x03)
 
 struct gzvm_memory_region {
 	__u32 slot;
