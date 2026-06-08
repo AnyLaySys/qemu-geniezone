@@ -77,20 +77,12 @@ Run example
 ===========
 
 Use the regular Arm ``virt`` machine and enable GZVM with
-``-accel gzvm``:
+``-accel gzvm``. This example is kept on one line so it can be copied
+directly:
 
 .. code-block:: shell
 
-  ./build/qemu-system-aarch64 \
-    -machine virt,gic-version=3 \
-    -cpu host \
-    -accel gzvm \
-    -m 1024 \
-    -smp 4 \
-    -nographic \
-    -kernel Image \
-    -append "console=ttyAMA0" \
-    -initrd rootfs.cpio
+  ./build/qemu-system-aarch64 -M virt -accel gzvm -cpu host -m 4G -kernel /root/gzvm/kernel -append "root=/dev/vda2 rw console=ttyAMA0" -drive if=none,id=hd,file=/root/gzvm/Manjaro.img,format=raw -device virtio-blk-pci,drive=hd -netdev user,id=net0 -device virtio-net-pci,netdev=net0 -device virtio-gpu-pci -nographic
 
 For protected VM mode, use:
 

@@ -49,18 +49,18 @@ jobs:
         set -e
         srcDir="$GITHUB_WORKSPACE/build/src/qemu-geniezone-main"
         sysrootDir="$GITHUB_WORKSPACE/build/sysroot"
-        qvmDir="$GITHUB_WORKSPACE/qvm"
+        qvmDir="$GITHUB_WORKSPACE/qemu-gzvm"
         toolchain="$HOME/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
         mkdir -p "$qvmDir"
         cp -L -t "$qvmDir" "$srcDir/build/qemu-system-aarch64" "$sysrootDir/lib/libpixman-1.so" "$sysrootDir/lib/libusb-1.0.so" "$sysrootDir/lib/libglib-2.0.so.0" "$sysrootDir/lib/libgmodule-2.0.so.0" "$sysrootDir/lib/libintl.so.8" "$sysrootDir/lib/libpcre2-8.so" "$toolchain/sysroot/usr/lib/aarch64-linux-android/$apiLevel/libz.so"
         install -D "$srcDir/pc-bios/keymaps/en-us" "$qvmDir/pc-bios/keymaps/en-us"
         install -D "$srcDir/pc-bios/efi-virtio.rom" "$qvmDir/pc-bios/efi-virtio.rom"
         "$toolchain/bin/llvm-strip" --strip-all "$qvmDir/qemu-system-aarch64" "$qvmDir"/*.so
-        tar --numeric-owner -c qvm | xz > qvm.xz
+        tar --numeric-owner -c qemu-gzvm | xz > qemu-gzvm.xz
     - name: 上传
       uses: actions/upload-artifact@v7
       with:
-        name: qvm
-        path: qvm.xz
+        name: qemu-gzvm
+        path: qemu-gzvm.xz
         archive: false
         if-no-files-found: error

@@ -72,20 +72,12 @@ GZVM 相关代码主要在这些位置：
 运行示例
 ========
 
-GZVM 使用普通 Arm ``virt`` 机器，并通过 ``-accel gzvm`` 启用：
+GZVM 使用普通 Arm ``virt`` 机器，并通过 ``-accel gzvm`` 启用。下面是一条
+可直接复制的示例命令：
 
 .. code-block:: shell
 
-  ./build/qemu-system-aarch64 \
-    -machine virt,gic-version=3 \
-    -cpu host \
-    -accel gzvm \
-    -m 1024 \
-    -smp 4 \
-    -nographic \
-    -kernel Image \
-    -append "console=ttyAMA0" \
-    -initrd rootfs.cpio
+  ./build/qemu-system-aarch64 -M virt -accel gzvm -cpu host -m 4G -kernel /root/gzvm/kernel -append "root=/dev/vda2 rw console=ttyAMA0" -drive if=none,id=hd,file=/root/gzvm/Manjaro.img,format=raw -device virtio-blk-pci,drive=hd -netdev user,id=net0 -device virtio-net-pci,netdev=net0 -device virtio-gpu-pci -nographic
 
 protected VM 可使用：
 
