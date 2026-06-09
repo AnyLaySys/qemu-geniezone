@@ -1,10 +1,7 @@
 #include "qemu/osdep.h"
 #include <sys/ioctl.h>
-#include <sys/eventfd.h>
-#include <signal.h>
 #include "qemu/error-report.h"
 #include "qemu/atomic.h"
-#include "qemu/units.h"
 #include "hw/core/cpu.h"
 #include "system/cpus.h"
 #include "system/gzvm.h"
@@ -13,14 +10,11 @@
 #include "exec/cpu-common.h"
 #include "system/memory.h"
 #include "system/address-spaces.h"
-#include "hw/core/boards.h"
-#include "qapi/error.h"
-#include "qemu/event_notifier.h"
 #include "qemu/main-loop.h"
 #include "system/runstate.h"
-#include "qemu/timer.h"
 #include "qemu/guest-random.h"
 #include "gzvm-internal.h"
+#include "trace.h"
 
 static int gzvm_init_vcpu(CPUState *cpu)
 {
@@ -30,7 +24,7 @@ static int gzvm_init_vcpu(CPUState *cpu)
     ret = gzvm_vm_ioctl(GZVM_CREATE_VCPU, (void *)(uintptr_t)cpu->cpu_index);
     if (ret < 0) {
         g_free(vcpu);
-        error_report("GZVM_CREATE_VCPU failed: %s (errno=%d)",
+        error_report("gzvm: GZVM_CREATE_VCPU failed: %s (errno=%d)",
                      strerror(errno), errno);
         return ret;
     }
@@ -57,7 +51,7 @@ static int gzvm_cpu_exec(CPUState *cpu)
         if (errno == EINTR || errno == EAGAIN) {
             return EXCP_INTERRUPT;
         }
-        error_report("GZVM_RUN failed: %s (errno=%d)", strerror(errno), errno);
+        error_report("gzvm: GZVM_RUN failed: %s (errno=%d)", strerror(errno), errno);
         return -1;
     }
 
@@ -76,6 +70,13 @@ static int gzvm_cpu_exec(CPUState *cpu)
     case GZVM_EXIT_IRQ:
         return EXCP_INTERRUPT;
     case GZVM_EXIT_HYPERCALL:
+        /*
+         * GenieZone at EL2 handles PSCI CPU_ON/OFF/SUSPEND etc.
+         * in-kernel.  Hypercalls reaching QEMU are unrecognised.
+         * The return value in x0 is left as the kernel set it.
+         */
+        warn_report("gzvm: VCPU%u unhandled hypercall fn=0x%" PRIx64,
+                    cpu->cpu_index, (uint64_t)run->hypercall.args[0]);
         return EXCP_INTERRUPT;
     case GZVM_EXIT_GZ:
         return EXCP_INTERRUPT;
@@ -131,6 +132,7 @@ void *gzvm_cpu_thread_fn(void *arg)
     current_cpu = cpu;
 
     gzvm_init_cpu_signals();
+    gzvm_unblock_sigsegv();
 
     ret = gzvm_init_vcpu(cpu);
     if (ret) {

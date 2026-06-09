@@ -26,6 +26,7 @@ void gzvm_init_cpu_signals(void)
 
     memset(&sigact, 0, sizeof(sigact));
     sigact.sa_handler = gzvm_ipi_signal;
+    sigact.sa_flags = SA_RESTART;
     sigaction(SIG_IPI, &sigact, NULL);
 
     pthread_sigmask(SIG_BLOCK, NULL, &set);

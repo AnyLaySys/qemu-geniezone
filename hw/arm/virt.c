@@ -37,6 +37,7 @@
 #include "hw/core/sysbus.h"
 #include "hw/arm/boot.h"
 #include "hw/arm/virt.h"
+#include "hw/arm/virt-gzvm.h"
 #include "hw/arm/machines-qom.h"
 #include "hw/block/flash.h"
 #include "hw/display/ramfb.h"
@@ -2438,14 +2439,7 @@ void virt_machine_done(Notifier *notifier, void *data)
     if (dtb_size < 0) {
         exit(1);
     }
-    if (gzvm_enabled()) {
-        gzvm_arm_set_dtb(info->dtb_start, dtb_size);
-        void *dtb_data = rom_ptr_for_as(as, info->dtb_start, dtb_size);
-        if (dtb_data) {
-            fw_cfg_add_file(vms->fw_cfg, "etc/fdt",
-                            g_memdup2(dtb_data, dtb_size), dtb_size);
-        }
-    }
+    virt_gzvm_post_dtb(vms, info->dtb_start, dtb_size, as);
 
     pci_bus_add_fw_cfg_extra_pci_roots(vms->fw_cfg, vms->bus,
                                        &error_abort);
@@ -2776,7 +2770,12 @@ static void finalize_msi_controller(VirtMachineState *vms)
         }  else if (hvf_enabled() && hvf_irqchip_in_kernel()) {
             vms->msi_controller = VIRT_MSI_CTRL_GICV2M;
         } else if (gzvm_enabled()) {
-            vms->msi_controller = VIRT_MSI_CTRL_NONE;
+            /*
+             * GICv2m frame at 0x08020000 is outside the kernel's DIST/REDIST
+             * range, so MSI writes trap to QEMU's arm-gicv2m device, which
+             * delivers SPIs via GZVM_IRQ_LINE.
+             */
+            vms->msi_controller = VIRT_MSI_CTRL_GICV2M;
         } else if (vms->gic_version == VIRT_GIC_VERSION_5) {
             /* GICv5 ITS is not yet implemented */
             vms->msi_controller = VIRT_MSI_CTRL_NONE;
@@ -2812,11 +2811,6 @@ static void finalize_msi_controller(VirtMachineState *vms)
             exit(1);
         }
     }
-    if (vms->msi_controller == VIRT_MSI_CTRL_GICV2M && gzvm_enabled()) {
-        error_report("GICv2M not supported on GZVM.");
-        exit(1);
-    }
-
     assert(vms->msi_controller != VIRT_MSI_CTRL_AUTO);
 }
 
@@ -2955,9 +2949,7 @@ static void machvirt_init(MachineState *machine)
         memory_region_add_subregion_overlap(secure_sysmem, 0, sysmem, -1);
     }
 
-    if (gzvm_enabled()) {
-        gzvm_set_ram_base(vms->memmap[VIRT_MEM].base);
-    }
+    virt_gzvm_init(vms);
     firmware_loaded = virt_firmware_init(vms, sysmem,
                                          secure_sysmem ?: sysmem);
 
@@ -3179,11 +3171,7 @@ static void machvirt_init(MachineState *machine)
     virt_flash_fdt(vms, sysmem, secure_sysmem ?: sysmem);
 
     create_gic(vms, sysmem);
-    if (gzvm_enabled()) {
-        gzvm_set_gic_bases(vms->memmap[VIRT_GIC_DIST].base,
-                           vms->memmap[VIRT_GIC_REDIST].base,
-                           vms->memmap[VIRT_GIC_REDIST].size);
-    }
+    virt_gzvm_post_gic(vms);
     create_msi_controller(vms);
 
     virt_post_cpus_gic_realized(vms, sysmem);
@@ -3233,21 +3221,14 @@ static void machvirt_init(MachineState *machine)
     }
 
     vms->highmem_ecam &= (!firmware_loaded || aarch64);
-
-    if (gzvm_enabled()) {
-        vms->highmem_ecam = false;
-        vms->highmem_mmio = false;
-    }
+    virt_gzvm_disable_highmem(vms);
 
     create_rtc(vms);
 
     create_pcie(vms);
     create_cxl_host_reg_region(vms);
 
-    if (gzvm_enabled() && vms->bus && MACHINE(vms)->enable_graphics &&
-        !vga_interface_created) {
-        pci_create_simple(vms->bus, -1, "virtio-gpu-pci");
-    }
+    virt_gzvm_create_virtio_gpu(vms);
 
     if (aarch64 && firmware_loaded && virt_is_acpi_enabled(vms)) {
         vms->acpi_dev = create_acpi_ged(vms);
@@ -3295,10 +3276,7 @@ static void machvirt_init(MachineState *machine)
     vms->bootinfo.get_dtb = machvirt_dtb;
     vms->bootinfo.skip_dtb_autoload = true;
     vms->bootinfo.firmware_loaded = firmware_loaded;
-    if (gzvm_enabled() && firmware_loaded) {
-        vms->bootinfo.entry = vms->memmap[VIRT_MEM].base;
-        vms->bootinfo.dtb_start = vms->memmap[VIRT_MEM].base + 4 * MiB;
-    }
+    virt_gzvm_set_bootinfo(vms, firmware_loaded);
     vms->bootinfo.psci_conduit = vms->psci_conduit;
     arm_load_kernel(ARM_CPU(first_cpu), machine, &vms->bootinfo);
 

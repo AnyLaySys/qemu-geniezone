@@ -1,9 +1,6 @@
 #include "qemu/osdep.h"
-#include <sys/ioctl.h>
 #include <stdio.h>
-#include <string.h>
 #include "qemu/error-report.h"
-#include "hw/core/boards.h"
 #include "cpu.h"
 #include "internals.h"
 #include "gzvm_arm.h"
@@ -93,15 +90,15 @@ void gzvm_set_gic_bases(uint64_t dist_base, uint64_t redist_base,
      * ignores the dev_addr fields.  If the machine memory map differs,
      * the kernel and QEMU will be out of sync — warn here.
      */
-    if (dist_base != 0x08000000ULL) {
-        warn_report("gzvm    │machine DIST base 0x%" PRIx64
-                    " != kernel hardcoded 0x08000000; GIC may not work",
-                    dist_base);
-    }
-    if (redist_base != 0x080A0000ULL) {
-        warn_report("gzvm    │machine REDIST base 0x%" PRIx64
-                    " != kernel hardcoded 0x080A0000; GIC may not work",
-                    redist_base);
+    if (dist_base != 0x08000000ULL || redist_base != 0x080A0000ULL) {
+        warn_report("gzvm: GIC base address mismatch:");
+        warn_report("  QEMU virt: DIST=0x%08" PRIx64
+                    " REDIST=0x%08" PRIx64 " (size=0x%" PRIx64 ")",
+                    dist_base, redist_base, redist_size);
+        warn_report("  Kernel:    DIST=0x%08x REDIST=0x%08x",
+                    0x08000000, 0x080A0000);
+        warn_report("  GIC will likely not work.  The kernel driver "
+                    "ignores dev_addr and uses fixed addresses.");
     }
 }
 
@@ -155,6 +152,17 @@ int gzvm_arch_get_registers(CPUState *cs, int level)
     return 0;
 }
 
+static int gzvm_set_one_reg_err(CPUState *cs, uint64_t reg_id, uint64_t *val,
+                                 const char *name)
+{
+    int ret = gzvm_set_one_reg(cs, reg_id, val);
+    if (ret) {
+        error_report("gzvm: put_registers: %s failed: %s",
+                     name, strerror(errno));
+    }
+    return ret;
+}
+
 int gzvm_arch_put_registers(CPUState *cs, int level)
 {
     uint64_t val;
@@ -170,9 +178,9 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
      * powered off by the hypervisor and are completed by PSCI CPU_ON.
      */
     val = PSTATE_DAIF | PSTATE_MODE_EL1h;
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
+    ret = gzvm_set_one_reg_err(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE),
+                                &val, "pstate");
     if (ret) {
-        error_report("gzvm: put_registers: pstate failed: %s", strerror(errno));
         return ret;
     }
 
@@ -181,16 +189,16 @@ int gzvm_arch_put_registers(CPUState *cs, int level)
     }
 
     val = env->pc;
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &val);
+    ret = gzvm_set_one_reg_err(cs, GZVM_CORE_REG(GZVM_REGS_PC),
+                                &val, "pc");
     if (ret) {
-        error_report("gzvm: put_registers: pc failed: %s", strerror(errno));
         return ret;
     }
 
     val = env->xregs[0];
-    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(0)), &val);
+    ret = gzvm_set_one_reg_err(cs, GZVM_CORE_REG(GZVM_REGS_X(0)),
+                                &val, "x0");
     if (ret) {
-        error_report("gzvm: put_registers: x0 failed: %s", strerror(errno));
         return ret;
     }
 
@@ -395,8 +403,19 @@ void gzvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
     {
         uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
         int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
+        unsigned int gzvm_parange;
         if (r == 0 && cap > 0) {
-            unsigned int gzvm_parange = round_down_to_parange_index(cap);
+            gzvm_parange = round_down_to_parange_index(cap);
+        } else {
+            /*
+             * Old kernel driver does not support GZVM_CAP_ARM_VM_IPA_SIZE.
+             * The kernel sanitises ID_AA64MMFR0_EL1.PARANGE to 0 (32-bit)
+             * on MRS access, which would limit the guest to 4 GB.  Default
+             * to 40-bit IPA to support guests with up to 1 TB of RAM.
+             */
+            gzvm_parange = 2; /* 40-bit */
+        }
+        {
             unsigned int cur_parange =
                 FIELD_EX64_IDREG(isar, ID_AA64MMFR0, PARANGE);
             if (gzvm_parange > cur_parange) {
@@ -407,10 +426,21 @@ void gzvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
         }
     }
 
-    if (cpu_isar_feature(aa64_sve, cpu)) {
-        cpu->sve_vq.supported = MAKE_64BIT_MASK(0, ARM_MAX_VQ);
+    /*
+     * GZVM kernel driver has no SVE/SME register type (no
+     * GZVM_REG_ARM64_SVE in the UAPI), so we cannot save/restore
+     * SVE/SME state.  Mask these features out of the ID registers
+     * until kernel support arrives.
+     */
+    {
+        uint64_t pfr0 = GET_IDREG(isar, ID_AA64PFR0);
+        pfr0 = FIELD_DP64(pfr0, ID_AA64PFR0, SVE, 0);
+        SET_IDREG(isar, ID_AA64PFR0, pfr0);
     }
-    if (cpu_isar_feature(aa64_sme, cpu)) {
-        cpu->sme_vq.supported = SVE_VQ_POW2_MAP;
+    {
+        uint64_t pfr1 = GET_IDREG(isar, ID_AA64PFR1);
+        pfr1 = FIELD_DP64(pfr1, ID_AA64PFR1, SME, 0);
+        SET_IDREG(isar, ID_AA64PFR1, pfr1);
     }
+    SET_IDREG(isar, ID_AA64SMFR0, 0);
 }

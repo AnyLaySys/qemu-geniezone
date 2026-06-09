@@ -9,25 +9,6 @@
 #include "linux-headers/linux/gzvm.h"
 #include "gzvm-internal.h"
 
-int gzvm_add_irqfd(int irqfd, int gsi, bool resample, Error **errp)
-{
-    int ret;
-    struct gzvm_irqfd gzirqfd;
-
-    memset(&gzirqfd, 0, sizeof(gzirqfd));
-    gzirqfd.fd = irqfd;
-    gzirqfd.gsi = gsi;
-    if (resample) {
-        gzirqfd.flags = GZVM_IRQFD_FLAG_RESAMPLE;
-    }
-
-    ret = gzvm_vm_ioctl(GZVM_IRQFD, &gzirqfd);
-    if (ret) {
-        error_setg_errno(errp, errno, "GZVM_IRQFD failed");
-    }
-    return ret;
-}
-
 static int
 gzvm_set_ioeventfd_mmio(int fd, hwaddr addr, uint32_t size, uint64_t data,
                          bool datamatch, bool assign)
@@ -75,10 +56,16 @@ gzvm_mem_ioeventfd_del(MemoryListener *listener, MemoryRegionSection *section,
                         bool match_data, uint64_t data, EventNotifier *e)
 {
     int fd = event_notifier_get_fd(e);
+    int r;
 
-    gzvm_set_ioeventfd_mmio(fd, section->offset_within_address_space,
-                             int128_get64(section->size), data,
-                             match_data, false);
+    r = gzvm_set_ioeventfd_mmio(fd, section->offset_within_address_space,
+                                 int128_get64(section->size), data,
+                                 match_data, false);
+    if (r < 0 && errno != ENOENT) {
+        error_report("gzvm: ioeventfd_del failed addr=0x%" PRIx64 ": %s",
+                     (uint64_t)section->offset_within_address_space,
+                     strerror(errno));
+    }
 }
 
 MemoryListener gzvm_ioeventfd_listener = {

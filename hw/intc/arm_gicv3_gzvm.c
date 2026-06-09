@@ -50,7 +50,10 @@ static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
                     (irq << GZVM_IRQ_NUM_SHIFT);
     irq_level.level = level;
 
-    gzvm_vm_ioctl(GZVM_IRQ_LINE, &irq_level);
+    if (gzvm_vm_ioctl(GZVM_IRQ_LINE, &irq_level)) {
+        warn_report("gzvm: GZVM_IRQ_LINE failed for irq=%d level=%d: %s",
+                    irq, level, strerror(errno));
+    }
 }
 
 static const MemoryRegionOps gzvm_gic_ops[] = {

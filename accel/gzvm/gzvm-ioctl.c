@@ -18,6 +18,7 @@ int gzvm_dev_ioctl(GZVMState *s, int type, void *arg)
 
 int gzvm_vm_ioctl(int type, void *arg)
 {
+    assert(gzvm_ioctl_state != NULL);
     return ioctl(gzvm_ioctl_state->vmfd, type, arg);
 }
 

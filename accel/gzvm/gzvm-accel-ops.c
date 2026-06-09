@@ -3,13 +3,12 @@
 #include "qemu/thread.h"
 #include "hw/core/boards.h"
 #include "hw/core/cpu.h"
-#include "accel/accel-ops.h"
 #include "accel/accel-cpu-ops.h"
+#include "accel/accel-ops.h"
 #include "system/cpus.h"
 #include "system/gzvm.h"
 #include "system/gzvm_int.h"
 #include "gzvm-internal.h"
-#include "qapi/visitor.h"
 #include "qapi/error.h"
 #include "migration/blocker.h"
 
@@ -30,7 +29,7 @@ static int gzvm_init(AccelState *as, MachineState *ms)
     }
 
     error_setg(&gzvm_migration_blocker,
-               "GZVM: migration not supported (no dirty page tracking or GET_ONE_REG in kernel API)");
+               "gzvm: migration not supported (no dirty page tracking or GET_ONE_REG in kernel API)");
     ret = migrate_add_blocker(&gzvm_migration_blocker, &local_err);
     if (ret < 0) {
         error_report_err(local_err);
@@ -57,6 +56,9 @@ static void gzvm_set_protected(Object *obj, bool value, Error **errp)
 static void gzvm_accel_instance_finalize(Object *obj)
 {
     GZVMState *s = GZVM_STATE(obj);
+    if (gzvm_migration_blocker) {
+        migrate_del_blocker(&gzvm_migration_blocker);
+    }
     g_free(s->slots);
     g_free(s->sorted_ids);
 }

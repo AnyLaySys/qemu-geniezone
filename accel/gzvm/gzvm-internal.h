@@ -11,6 +11,7 @@
 
 /* gzvm-signal.c */
 void gzvm_install_sigsegv_handler(void);
+void gzvm_unblock_sigsegv(void);
 
 /* gzvm-ioctl.c */
 int gzvm_dev_ioctl(GZVMState *s, int type, void *arg);

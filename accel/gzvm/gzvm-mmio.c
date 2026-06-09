@@ -9,6 +9,7 @@
 #include "system/gzvm_int.h"
 #include "linux-headers/linux/gzvm.h"
 #include "gzvm-internal.h"
+#include "trace.h"
 
 /*
  * Determine the correct MemTxAttrs for an MMIO access.
@@ -33,12 +34,26 @@ static gzvm_slot *gzvm_find_slot_for_mmio(hwaddr addr, hwaddr *slot_addr_out)
         *slot_addr_out = addr;
         return slot;
     }
-    /* Hypervisor may misreport IPA: bit 30 instead of bit 26 */
+
+    /*
+     * Workaround: on some GenieZone kernel versions the hypervisor may
+     * misreport the IPA by encoding bit 30 instead of bit 26 (e.g. IPA
+     * 0x4XXXXXXX instead of 0x04XXXXXX).  This appears to be a
+     * Mediatek-specific issue with early GZVM firmware.  When the
+     * standard lookup fails, try the corrected address.
+     *
+     * Remove this once the kernel driver IPA reporting is verified
+     * correct across all GenieZone platforms.
+     */
     if ((addr >> 28) == 0x4) {
         hwaddr corrected = (addr & 0x0FFFFFFF) | 0x04000000;
         slot = gzvm_find_slot_by_addr(corrected);
         if (slot) {
             *slot_addr_out = corrected;
+            warn_report_once("gzvm: MMIO IPA corrected from 0x%"
+                             PRIx64 " to 0x%" PRIx64
+                             " (bit-30/bit-26 workaround)",
+                             addr, corrected);
             return slot;
         }
     }
@@ -89,6 +104,7 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
 
 int gzvm_handle_system_event(CPUState *cpu, struct gzvm_vcpu_run *run)
 {
+    trace_gzvm_handle_system_event(run->system_event.type);
     switch (run->system_event.type) {
     case GZVM_SYSTEM_EVENT_SHUTDOWN:
         qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
@@ -101,6 +117,14 @@ int gzvm_handle_system_event(CPUState *cpu, struct gzvm_vcpu_run *run)
         return 0;
     case GZVM_SYSTEM_EVENT_WAKEUP:
         cpu->halted = 0;
+        return EXCP_INTERRUPT;
+    case GZVM_SYSTEM_EVENT_SUSPEND:
+    case GZVM_SYSTEM_EVENT_S2IDLE:
+        cpu->halted = 1;
+        return EXCP_INTERRUPT;
+    case GZVM_SYSTEM_EVENT_SEV_TERM:
+        warn_report("gzvm: SEV_TERM event on VCPU%u (not applicable to GZVM)",
+                    cpu->cpu_index);
         return EXCP_INTERRUPT;
     default:
         return 0;

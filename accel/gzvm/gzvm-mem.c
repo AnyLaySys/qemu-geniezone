@@ -1,7 +1,5 @@
 #include "qemu/osdep.h"
 #include <sys/ioctl.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include "qemu/error-report.h"
 #include "exec/cpu-common.h"
 #include "hw/core/cpu.h"
@@ -11,6 +9,7 @@
 #include "system/gzvm_int.h"
 #include "linux-headers/linux/gzvm.h"
 #include "gzvm-internal.h"
+#include "trace.h"
 
 #define gzvm_slots_lock(s)    qemu_mutex_lock(&s->slots_lock)
 #define gzvm_slots_unlock(s)  qemu_mutex_unlock(&s->slots_lock)
@@ -66,7 +65,13 @@ static gzvm_slot *gzvm_find_overlap_slot(GZVMState *s, uint64_t start, uint64_t 
 
 gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
 {
-    GZVMState *s = GZVM_STATE(current_accel());
+    AccelState *accel = current_accel();
+    GZVMState *s;
+
+    if (!accel) {
+        return NULL;
+    }
+    s = GZVM_STATE(accel);
 
     if (!s->nr_active_slots) {
         return NULL;
@@ -130,6 +135,7 @@ static int gzvm_remove_mem_slot_locked(GZVMState *s, gzvm_slot *slot)
                      slot->id, strerror(errno), errno);
         return ret;
     }
+    trace_gzvm_del_mem_slot(slot->id, slot->start, slot->size);
 
     gzvm_remove_slot_from_sorted_ids(s, slot);
     slot->size = 0;
@@ -139,8 +145,8 @@ static int gzvm_remove_mem_slot_locked(GZVMState *s, gzvm_slot *slot)
     return 0;
 }
 
-static int
-gzvm_remove_overlap_slots_locked(GZVMState *s, uint64_t start, uint64_t size)
+static int gzvm_remove_overlap_slots_locked(GZVMState *s, uint64_t start,
+                                             uint64_t size)
 {
     gzvm_slot *slot;
 
@@ -153,8 +159,18 @@ gzvm_remove_overlap_slots_locked(GZVMState *s, uint64_t start, uint64_t size)
     return 0;
 }
 
-static int
-gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
+static int gzvm_remove_overlap_slots(GZVMState *s, uint64_t start, uint64_t size)
+{
+    int ret;
+
+    gzvm_slots_lock(s);
+    ret = gzvm_remove_overlap_slots_locked(s, start, size);
+    gzvm_slots_unlock(s);
+    return ret;
+}
+
+static int gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa,
+                              uint64_t size,
                   uint32_t flags)
 {
     gzvm_slot *slot;
@@ -174,8 +190,9 @@ gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
     gumr.userspace_addr = (__u64)(uintptr_t)hva;
 
     ret = gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
+    trace_gzvm_add_mem_slot(slot->id, gpa, size, hva, flags);
     if (ret) {
-        error_report("GZVM_SET_USER_MEMORY_REGION FAILED: %s (errno=%d)",
+        error_report("gzvm: GZVM_SET_USER_MEMORY_REGION failed: %s (errno=%d)",
                      strerror(errno), errno);
         return ret;
     }
@@ -200,8 +217,8 @@ gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
     return 0;
 }
 
-static int
-gzvm_add_mem(GZVMState *s, MemoryRegionSection *section, uint32_t flags)
+static int gzvm_add_mem(GZVMState *s, MemoryRegionSection *section,
+                        uint32_t flags)
 {
     MemoryRegion *area = section->mr;
     uint64_t total_size = int128_get64(section->size);
@@ -233,9 +250,7 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
     uint64_t section_size = int128_get64(section->size);
 
     if (!add) {
-        gzvm_slots_lock(s);
-        gzvm_remove_overlap_slots_locked(s, section_start, section_size);
-        gzvm_slots_unlock(s);
+        gzvm_remove_overlap_slots(s, section_start, section_size);
         return;
     }
 
@@ -300,21 +315,30 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
         }
     }
 
-    gzvm_add_mem(s, section, flags);
+    if (gzvm_add_mem(s, section, flags)) {
+        gzvm_slots_unlock(s);
+        return;
+    }
 
     gzvm_slots_unlock(s);
 }
 
 static void gzvm_region_add(MemoryListener *listener, MemoryRegionSection *section)
 {
-    GZVMState *s = GZVM_STATE(current_accel());
-    gzvm_set_phys_mem(s, section, true);
+    AccelState *accel = current_accel();
+    if (!accel) {
+        return;
+    }
+    gzvm_set_phys_mem(GZVM_STATE(accel), section, true);
 }
 
 static void gzvm_region_del(MemoryListener *listener, MemoryRegionSection *section)
 {
-    GZVMState *s = GZVM_STATE(current_accel());
-    gzvm_set_phys_mem(s, section, false);
+    AccelState *accel = current_accel();
+    if (!accel) {
+        return;
+    }
+    gzvm_set_phys_mem(GZVM_STATE(accel), section, false);
 }
 
 static MemoryListener gzvm_memory_listener = {
@@ -324,12 +348,36 @@ static MemoryListener gzvm_memory_listener = {
     .region_del = gzvm_region_del,
 };
 
+static int gzvm_create_vgic_device(GZVMState *s,
+                                    int dev_type, uint64_t dev_addr,
+                                    uint64_t dev_reg_size,
+                                    uint64_t *base_out, const char *name)
+{
+    struct gzvm_create_device dev = {
+        .dev_type = dev_type,
+        .dev_addr = dev_addr,
+        .dev_reg_size = dev_reg_size,
+    };
+    int ret = gzvm_vm_ioctl(GZVM_CREATE_DEVICE, &dev);
+    if (ret) {
+        error_report("gzvm: create %s failed: %s (errno=%d)",
+                     name, strerror(errno), errno);
+        return ret;
+    }
+    *base_out = dev_addr;
+    return 0;
+}
+
 int gzvm_create_vm(void)
 {
+    AccelState *accel = current_accel();
     GZVMState *s;
     int ret;
 
-    s = GZVM_STATE(current_accel());
+    if (!accel) {
+        return -1;
+    }
+    s = GZVM_STATE(accel);
 
     s->fd = qemu_open_old("/dev/gzvm", O_RDWR);
     if (s->fd == -1) {
@@ -339,20 +387,23 @@ int gzvm_create_vm(void)
 
     ret = gzvm_dev_ioctl(s, GZVM_CREATE_VM, NULL);
     if (ret < 0) {
-        error_report("GZVM_CREATE_VM failed: %s (errno=%d)",
+        error_report("gzvm: GZVM_CREATE_VM failed: %s (errno=%d)",
                      strerror(errno), errno);
+        close(s->fd);
         return -1;
     }
     s->vmfd = ret;
+    trace_gzvm_create_vm(s->vmfd);
 
     {
         uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
         int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
         if (r == 0) {
-            error_report("gzvm: IPA size: %d bits", (int)cap);
+            trace_gzvm_ipa_size(cap);
+            info_report("gzvm: IPA size: %d bits", (int)cap);
         } else {
-            error_report("gzvm: IPA size probe failed (r=%d), assuming 40 bits",
-                         r);
+            warn_report("gzvm: IPA size probe failed (r=%d), "
+                        "assuming 40 bits", r);
         }
     }
 
@@ -368,7 +419,8 @@ int gzvm_create_vm(void)
             uint64_t c = cap_list[i].cap;
             int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &c);
             if (r == 0) {
-                error_report("gzvm: cap %s = %" PRIu64, cap_list[i].name, c);
+                trace_gzvm_capability(cap_list[i].name, c);
+                info_report("gzvm: cap %s = %" PRIu64, cap_list[i].name, c);
             }
         }
     }
@@ -382,38 +434,26 @@ int gzvm_create_vm(void)
     }
 
     gzvm_install_sigsegv_handler();
+    trace_gzvm_sigsegv_handler_installed();
     memory_listener_register(&gzvm_memory_listener, &address_space_memory);
     memory_listener_register(&gzvm_ioeventfd_listener, &address_space_memory);
 
-    {
-        struct gzvm_create_device dist_dev = {
-            .dev_type = GZVM_DEV_TYPE_ARM_VGIC_V3_DIST,
-            .dev_addr = 0x08000000ULL,
-            .dev_reg_size = 0x10000,
-        };
-        ret = gzvm_vm_ioctl(GZVM_CREATE_DEVICE, &dist_dev);
-        if (ret) {
-            error_report("gzvm: GZVM_CREATE_DEVICE VGIC_DIST failed: %s (errno=%d)",
-                         strerror(errno), errno);
-            return -1;
-        }
-        s->gic_dist_base = 0x08000000ULL;
+    ret = gzvm_create_vgic_device(s, GZVM_DEV_TYPE_ARM_VGIC_V3_DIST,
+                                   0x08000000ULL, 0x10000,
+                                   &s->gic_dist_base, "VGIC_DIST");
+    if (ret) {
+        close(s->fd);
+        return -1;
     }
-
-    {
-        struct gzvm_create_device redist_dev = {
-            .dev_type = GZVM_DEV_TYPE_ARM_VGIC_V3_REDIST,
-            .dev_addr = 0x080A0000ULL,
-            .dev_reg_size = 0x20000ULL,
-        };
-        ret = gzvm_vm_ioctl(GZVM_CREATE_DEVICE, &redist_dev);
-        if (ret) {
-            error_report("gzvm: GZVM_CREATE_DEVICE VGIC_REDIST failed: %s (errno=%d)",
-                         strerror(errno), errno);
-            return -1;
-        }
-        s->gic_redist_base = 0x080A0000ULL;
+    trace_gzvm_vgic_dist_created(s->gic_dist_base);
+    ret = gzvm_create_vgic_device(s, GZVM_DEV_TYPE_ARM_VGIC_V3_REDIST,
+                                   0x080A0000ULL, 0x20000ULL,
+                                   &s->gic_redist_base, "VGIC_REDIST");
+    if (ret) {
+        close(s->fd);
+        return -1;
     }
+    trace_gzvm_vgic_redist_created(s->gic_redist_base);
 
     return 0;
 }

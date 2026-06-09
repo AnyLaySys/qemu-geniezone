@@ -12,6 +12,28 @@
         "--mcp"
       ],
       "enabled": true
+    },
+    "opencode-codebase-index": {
+      "type": "local",
+      "command": [
+        "opencode-codebase-index-mcp"
+      ],
+      "enabled": true
+    },
+    "codesight": {
+      "type": "local",
+      "command": [
+        "codesight",
+        "--mcp"
+      ],
+      "enabled": true
+    },
+    "aptu-coder": {
+      "type": "local",
+      "command": [
+        "aptu-coder"
+      ],
+      "enabled": true
     }
   }
 }

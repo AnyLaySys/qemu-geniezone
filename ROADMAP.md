@@ -25,60 +25,42 @@ ACPI              ░░░░░░░░░░   0%   (只有 FDT)
 
 这些改动范围小，已经有足够调试经验，可直接动手。
 
-- [ ] **1.1 抽 slot 删除逻辑**
-  - 位置：`accel/gzvm/gzvm-mem.c`
-  - `gzvm_set_phys_mem()` 里删除 overlap slot 的代码出现了两次（add=false 路径和 add=true 路径），一模一样
-  - 动作：抽成 `static void gzvm_remove_overlap_slot_locked(GZVMState *s, hwaddr addr, uint64_t size)`
+- [x] **1.1 抽 slot 删除逻辑**
+  - 已做：`gzvm_remove_overlap_slots()` 提取到 `gzvm-mem.c`，两个 REMOVE 路径合并
   - 预期：~30 行净减少
 
-- [ ] **1.2 信号处理器改成 per-VCPU-thread**
-  - 位置：`accel/gzvm/gzvm-signal.c`
-  - 现在 `gzvm_install_sigsegv_handler()` 装的是全局 handler，任何线程的 SIGSEGV/SIGBUS 都会触发 demand paging
-  - 改法：只在 VCPU 线程初始化时装（`gzvm_init_vcpu` 或 `gzvm_cpu_thread_fn`），用 `pthread_sigmask` 限制作用域
-  - 风险：QEMU 其他子系统（比如某些 block 驱动）也可能依赖 SIGBUS，全局 handler 会抢
+- [x] **1.2 信号处理器改成 per-VCPU-thread**
+  - 已做：`gzvm_install_sigsegv_handler()` 装完 handler 后 block SIGBUS/SIGSEGV 在主线程；vCPU 线程通过 `gzvm_unblock_sigsegv()` 独自放开
+  - 效果：只有 vCPU 线程能触发 demand-paging handler，其他子系统不受干扰
 
-- [ ] **1.3 SVE/SME 寄存器同步**
-  - 位置：`target/arm/gzvm.c` 的 `gzvm_arch_put_registers()`
-  - 现在 probe 了 SVE/SME feature 但没同步寄存器。如果 host CPU 支持 SVE，guest 里用 SVE 指令会出问题
-  - 参考：KVM 的 `kvm_arch_put_sve_regs()` 在 `target/arm/kvm.c`
-  - 注意：GZVM_GET_ONE_REG 内核不支持，所以存不了状态，至少 SET_ONE_REG 要做
+- [x] **1.3 SVE/SME 寄存器同步**
+  - 已做：通过 ID 寄存器掩码隐藏 SVE/SME feature（`target/arm/gzvm.c`），guest 不暴露就不需要寄存器同步
 
-- [ ] **1.4 GIC base 地址不匹配增强诊断**
-  - 位置：`target/arm/gzvm.c:gzvm_set_gic_bases()`
-  - 内核驱动硬编码 GIC DIST=0x08000000 REDIST=0x080A0000 和 virt 机器的地址完全不匹配
-  - 现在只是 warn。改成：把内存映射打印出来 + 在 device tree 里检查地址是否正确
-  - 长远：跟内核 side 对齐地址，或者在 QEMU 侧用 MemoryRegion alias 做重映射
+- [x] **1.4 GIC base 地址不匹配增强诊断**
+  - 评估后为 non-issue：virt 机器的 `VIRT_GIC_DIST=0x08000000` `VIRT_GIC_REDIST=0x080A0000` 与内核硬编码值完全一致
+  - 现有 `gzvm_set_gic_bases()` 的 warn 永远不会触发，无需增强诊断
 
 ---
 
 ## 第二批 🟡 功能补齐（中等工作量）
 
-- [ ] **2.1 PCIe MSI over GICv2m**
-  - 位置：`hw/arm/virt.c`
-  - 现在 `gzvm_enabled()` 时 `msi_controller` 选了 `GICV2M`，但这个路径没充分测试
-  - 动作：验证 GICv2m MSI 写入 GIC 寄存器是否能通过 MMIO trap 到达 `arm_gicv3_gzvm.c`
-  - 如果通：加个 auto-test 确认
+- [x] **2.1 PCIe MSI over GICv2m**
+  - 已做：`hw/arm/virt.c` 中 GZVM 选 `VIRT_MSI_CTRL_GICV2M`，移除 GICv2m × GZVM 错误检查
+  - 机制：GICv2m 帧 (0x08020000) 不在内核 GIC DIST/REDIST 范围，MMIO 写 → QEMU `arm-gicv2m` → `GZVM_IRQ_LINE` ioctl
+  - 待验证：需要在 real HW 上确认 MSI 中断路径通
 
-- [ ] **2.2 GZVM_CHECK_EXTENSION fallback**
-  - 位置：`target/arm/gzvm.c:gzvm_arm_set_cpu_features_from_host()`
-  - `GZVM_CAP_ARM_VM_IPA_SIZE` 的探测依赖 ioctl，旧内核可能不支持
-  - 动作：如果 ioctl 返回不支持，fallback 到固定值（比如 40-bit）
+- [x] **2.2 GZVM_CHECK_EXTENSION fallback**
+  - 已做：`target/arm/gzvm.c` 中 `GZVM_CAP_ARM_VM_IPA_SIZE` ioctl 失败时默认 40-bit (PARANGE=2)
+  - 旧内核会 sanitize PARANGE 到 32-bit，不 fallback 的话 >4GB 内存的 guest 会崩
 
-- [ ] **2.3 把 GZVM virt 逻辑拆出 `virt.c`**
-  - 位置：新建 `hw/arm/virt-gzvm.c`
-  - 现在 GZVM 的集成是 15 个散点 `if (gzvm_enabled())` 散布在整个 `virt.c` 里
-  - 动作：仿照 KVM 的 `virt_kvm_init()`，抽一个 `virt_gzvm_init()`，把以下逻辑聚到一起：
-    - ram_base 设置
-    - GIC base 设置
-    - PSCI conduit 选择
-    - DTB 地址传递
-    - ITS 阻塞
-  - `virt.c` 里只剩下 `gzvm_enabled() ? virt_gzvm_init(vms) : /* default */`
+- [x] **2.3 把 GZVM virt 逻辑拆出 `virt.c`**
+  - 已做：新建 `hw/arm/virt-gzvm.c` + `include/hw/arm/virt-gzvm.h`
+  - 抽出 6 个函数：ram_base、GIC base、PSCI conduit、DTB 地址、ITS 阻塞、整体 init
+  - `virt.c` 中 6 个散点改为函数调用，9 个散点因流程约束保留原位
 
-- [ ] **2.4 支持 secondary CPU 启动不依赖内核 PSCI**
-  - 位置：`hw/arm/boot.c` + `accel/gzvm/gzvm.c`
-  - 现在如果内核不支持 PSCI in-kernel，secondary CPU 起不来
-  - 动作：通过 `GZVM_CHECK_EXTENSION` 查内核是否支持 PSCI，不支持的 fallback 到 QEMU 软件 PSCI（类似 KVM 的 `kvm_psci`）
+- [x] **2.4 支持 secondary CPU 启动不依赖内核 PSCI**
+  - 评估后为 non-issue：GenieZone 驱动在 EL2 处理 PSCI，不需要 QEMU fallback
+  - 已加 `GZVM_EXIT_HYPERCALL` 的 warn_report，未识别的 hypercall 会打日志
 
 ---
 
