@@ -871,7 +871,7 @@ if get_option('kvm').allowed() and host_os == 'linux'
   accelerators += 'CONFIG_KVM'
 endif
 
-if get_option('gzvm').allowed() and (host_os == 'linux' or host_os == 'android')
+if get_option('gzvm').allowed() and (host_os == 'linux' or host_os == 'android') and host_arch == 'aarch64'
   accelerators += 'CONFIG_GZVM'
 endif
 

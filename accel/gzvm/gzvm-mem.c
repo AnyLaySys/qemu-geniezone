@@ -38,8 +38,14 @@ static int gzvm_find_first_ge(GZVMState *s, uint64_t addr)
 
 static gzvm_slot *gzvm_find_overlap_slot(GZVMState *s, uint64_t start, uint64_t size)
 {
-    uint64_t end = start + size;
+    uint64_t end;
     int first_ge = gzvm_find_first_ge(s, start);
+
+    if (!size || start > UINT64_MAX - size) {
+        return NULL;
+    }
+
+    end = start + size;
 
     if (first_ge < (int)s->nr_active_slots) {
         gzvm_slot *slot = &s->slots[s->sorted_ids[first_ge]];
@@ -50,7 +56,7 @@ static gzvm_slot *gzvm_find_overlap_slot(GZVMState *s, uint64_t start, uint64_t 
 
     if (first_ge > 0) {
         gzvm_slot *slot = &s->slots[s->sorted_ids[first_ge - 1]];
-        if (slot->start + slot->size > start) {
+        if (slot->start <= start && slot->size > start - slot->start) {
             return slot;
         }
     }
@@ -72,7 +78,7 @@ gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
         gzvm_slot *slot = &s->slots[s->sorted_ids[mid]];
         if (addr < slot->start) {
             hi = mid - 1;
-        } else if (addr >= slot->start + slot->size) {
+        } else if (addr - slot->start >= slot->size) {
             lo = mid + 1;
         } else {
             return slot;
@@ -91,7 +97,63 @@ static gzvm_slot *gzvm_get_free_slot(GZVMState *s)
     return NULL;
 }
 
-static void
+static void gzvm_remove_slot_from_sorted_ids(GZVMState *s, gzvm_slot *slot)
+{
+    int pos;
+
+    for (pos = 0; pos < (int)s->nr_active_slots; pos++) {
+        if (s->sorted_ids[pos] == slot->id) {
+            break;
+        }
+    }
+    if (pos < (int)s->nr_active_slots) {
+        memmove(&s->sorted_ids[pos], &s->sorted_ids[pos + 1],
+                (s->nr_active_slots - pos - 1) * sizeof(gint));
+        s->nr_active_slots--;
+    }
+}
+
+static int gzvm_remove_mem_slot_locked(GZVMState *s, gzvm_slot *slot)
+{
+    struct gzvm_userspace_memory_region gumr = {
+        .slot = slot->id,
+        .flags = 0,
+        .guest_phys_addr = slot->start,
+        .memory_size = 0,
+        .userspace_addr = (__u64)(uintptr_t)slot->mem,
+    };
+    int ret;
+
+    ret = gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
+    if (ret) {
+        error_report("gzvm: remove memory slot %u failed: %s (errno=%d)",
+                     slot->id, strerror(errno), errno);
+        return ret;
+    }
+
+    gzvm_remove_slot_from_sorted_ids(s, slot);
+    slot->size = 0;
+    slot->mem = NULL;
+    slot->start = 0;
+    slot->flags = 0;
+    return 0;
+}
+
+static int
+gzvm_remove_overlap_slots_locked(GZVMState *s, uint64_t start, uint64_t size)
+{
+    gzvm_slot *slot;
+
+    while ((slot = gzvm_find_overlap_slot(s, start, size))) {
+        int ret = gzvm_remove_mem_slot_locked(s, slot);
+        if (ret) {
+            return ret;
+        }
+    }
+    return 0;
+}
+
+static int
 gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
                   uint32_t flags)
 {
@@ -102,13 +164,8 @@ gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
     slot = gzvm_get_free_slot(s);
     if (!slot) {
         error_report("gzvm: No free memory slots available!");
-        return;
+        return -ENOSPC;
     }
-
-    slot->size = size;
-    slot->mem = hva;
-    slot->start = gpa;
-    slot->flags = flags;
 
     gumr.slot = slot->id;
     gumr.flags = flags;
@@ -120,8 +177,13 @@ gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
     if (ret) {
         error_report("GZVM_SET_USER_MEMORY_REGION FAILED: %s (errno=%d)",
                      strerror(errno), errno);
-        return;
+        return ret;
     }
+
+    slot->size = size;
+    slot->mem = hva;
+    slot->start = gpa;
+    slot->flags = flags;
 
     /* Insert slot->id into sorted_ids, maintaining address order */
     int ins_pos = 0;
@@ -135,9 +197,10 @@ gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa, uint64_t size,
     }
     s->sorted_ids[ins_pos] = slot->id;
     s->nr_active_slots++;
+    return 0;
 }
 
-static void
+static int
 gzvm_add_mem(GZVMState *s, MemoryRegionSection *section, uint32_t flags)
 {
     MemoryRegion *area = section->mr;
@@ -146,10 +209,10 @@ gzvm_add_mem(GZVMState *s, MemoryRegionSection *section, uint32_t flags)
                         section->offset_within_region;
     uint64_t base_gpa = section->offset_within_address_space;
 
-    gzvm_add_mem_slot(s, base_hva, base_gpa, total_size, flags);
+    return gzvm_add_mem_slot(s, base_hva, base_gpa, total_size, flags);
 }
 
-static void
+static int
 gzvm_add_mem_range(GZVMState *s, MemoryRegionSection *section,
                    uint64_t gpa, uint64_t size, uint32_t flags)
 {
@@ -158,7 +221,7 @@ gzvm_add_mem_range(GZVMState *s, MemoryRegionSection *section,
     uint8_t *hva = memory_region_get_ram_ptr(area) +
                    section->offset_within_region + offset;
 
-    gzvm_add_mem_slot(s, hva, gpa, size, flags);
+    return gzvm_add_mem_slot(s, hva, gpa, size, flags);
 }
 
 static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool add)
@@ -166,35 +229,12 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
     MemoryRegion *area = section->mr;
     uint32_t flags = GZVM_USER_MEM_REGION_GUEST_MEM;
     uint64_t page_size = qemu_real_host_page_size();
-    gzvm_slot *slot;
+    uint64_t section_start = section->offset_within_address_space;
+    uint64_t section_size = int128_get64(section->size);
 
     if (!add) {
         gzvm_slots_lock(s);
-        slot = gzvm_find_overlap_slot(s, section->offset_within_address_space,
-                                       int128_get64(section->size));
-        if (slot) {
-            struct gzvm_userspace_memory_region gumr = {
-                .slot = slot->id,
-                .flags = 0,
-                .guest_phys_addr = slot->start,
-                .memory_size = 0,
-                .userspace_addr = (__u64)(uintptr_t)slot->mem,
-            };
-            gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
-            slot->size = 0;
-            /* Remove slot->id from sorted_ids */
-            int pos;
-            for (pos = 0; pos < (int)s->nr_active_slots; pos++) {
-                if (s->sorted_ids[pos] == slot->id) {
-                    break;
-                }
-            }
-            if (pos < (int)s->nr_active_slots) {
-                memmove(&s->sorted_ids[pos], &s->sorted_ids[pos + 1],
-                        (s->nr_active_slots - pos - 1) * sizeof(gint));
-                s->nr_active_slots--;
-            }
-        }
+        gzvm_remove_overlap_slots_locked(s, section_start, section_size);
         gzvm_slots_unlock(s);
         return;
     }
@@ -204,42 +244,20 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
         return;
     }
 
-    if (!QEMU_IS_ALIGNED(int128_get64(section->size), page_size) ||
-        !QEMU_IS_ALIGNED(section->offset_within_address_space, page_size)) {
+    if (!QEMU_IS_ALIGNED(section_size, page_size) ||
+        !QEMU_IS_ALIGNED(section_start, page_size)) {
         return;
     }
 
-    if (section->offset_within_address_space < s->ram_base &&
+    if (section_start < s->ram_base &&
         !memory_region_is_rom(area) && !memory_region_is_romd(area)) {
         return;
     }
 
     gzvm_slots_lock(s);
-    slot = gzvm_find_overlap_slot(s, section->offset_within_address_space,
-                                   int128_get64(section->size));
-    if (slot) {
-        struct gzvm_userspace_memory_region gumr = {
-            .slot = slot->id,
-            .flags = 0,
-            .guest_phys_addr = slot->start,
-            .memory_size = 0,
-            .userspace_addr = (__u64)(uintptr_t)slot->mem,
-        };
-        gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
-        slot->size = 0;
-        {
-            int pos;
-            for (pos = 0; pos < (int)s->nr_active_slots; pos++) {
-                if (s->sorted_ids[pos] == slot->id) {
-                    break;
-                }
-            }
-            if (pos < (int)s->nr_active_slots) {
-                memmove(&s->sorted_ids[pos], &s->sorted_ids[pos + 1],
-                        (s->nr_active_slots - pos - 1) * sizeof(gint));
-                s->nr_active_slots--;
-            }
-        }
+    if (gzvm_remove_overlap_slots_locked(s, section_start, section_size)) {
+        gzvm_slots_unlock(s);
+        return;
     }
 
     if (s->protected_vm && (area->readonly || area->rom_device)) {
@@ -248,8 +266,6 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
 
     if (s->protected_vm && s->firmware_size &&
         !area->readonly && !area->rom_device) {
-        uint64_t section_start = section->offset_within_address_space;
-        uint64_t section_size = int128_get64(section->size);
         uint64_t section_end = section_start + section_size;
         uint64_t fw_start = QEMU_ALIGN_DOWN(s->firmware_start, page_size);
         uint64_t fw_end = QEMU_ALIGN_UP(s->firmware_start + s->firmware_size,
@@ -260,15 +276,24 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
             uint64_t protect_end = MIN(fw_end, section_end);
 
             if (protect_start > section_start) {
-                gzvm_add_mem_range(s, section, section_start,
-                                   protect_start - section_start, flags);
+                if (gzvm_add_mem_range(s, section, section_start,
+                                       protect_start - section_start, flags)) {
+                    gzvm_slots_unlock(s);
+                    return;
+                }
             }
-            gzvm_add_mem_range(s, section, protect_start,
-                               protect_end - protect_start,
-                               GZVM_USER_MEM_REGION_PROTECT_FW);
+            if (gzvm_add_mem_range(s, section, protect_start,
+                                   protect_end - protect_start,
+                                   GZVM_USER_MEM_REGION_PROTECT_FW)) {
+                gzvm_slots_unlock(s);
+                return;
+            }
             if (protect_end < section_end) {
-                gzvm_add_mem_range(s, section, protect_end,
-                                   section_end - protect_end, flags);
+                if (gzvm_add_mem_range(s, section, protect_end,
+                                       section_end - protect_end, flags)) {
+                    gzvm_slots_unlock(s);
+                    return;
+                }
             }
             gzvm_slots_unlock(s);
             return;

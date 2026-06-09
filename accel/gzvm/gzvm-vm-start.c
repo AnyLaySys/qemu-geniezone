@@ -19,7 +19,7 @@ void gzvm_start_vm(void)
             if (ret < 0) {
                 error_report("GZVM_ENABLE_CAP PVMFW_GPA failed: %s (errno=%d)",
                              strerror(errno), errno);
-                return;
+                exit(1);
             }
         }
 
@@ -31,7 +31,7 @@ void gzvm_start_vm(void)
         if (ret < 0) {
             error_report("GZVM_ENABLE_CAP PROTECTED_VM failed: %s (errno=%d)",
                          strerror(errno), errno);
-            return;
+            exit(1);
         }
     }
 
@@ -43,7 +43,7 @@ void gzvm_start_vm(void)
         if (ret != 0) {
             error_report("gzvm: GZVM_SET_DTB_CONFIG failed: %s (errno=%d)",
                          strerror(errno), errno);
-            return;
+            exit(1);
         }
     }
 }

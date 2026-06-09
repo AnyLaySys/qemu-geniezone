@@ -5,5 +5,4 @@ TARGET_XML_FILES= aarch64-core.xml aarch64-fpu.xml arm-core.xml arm-vfp.xml arm-
 # needed by boot.c
 TARGET_NEED_FDT=y
 TARGET_LONG_BITS=64
-CONFIG_GZVM=y
 TARGET_NOT_USING_LEGACY_LDST_PHYS_API=y

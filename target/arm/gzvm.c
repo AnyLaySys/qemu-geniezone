@@ -14,26 +14,14 @@
 
 #define GZVM_CORE_REG(offset)  (GZVM_REG_ARM64 | GZVM_REG_SIZE_U64 | \
                                 GZVM_REG_ARM_CORE | ((offset) / 4))
-#define GZVM_CORE_REG32(offset) (GZVM_REG_ARM64 | GZVM_REG_SIZE_U32 | \
-                                 GZVM_REG_ARM_CORE | ((offset) / 4))
-#define GZVM_CORE_REG128(offset) (GZVM_REG_ARM64 | GZVM_REG_SIZE_U128 | \
-                                  GZVM_REG_ARM_CORE | ((offset) / 4))
 
 #define GZVM_REGS_X(i)      ((i) * 8)
-#define GZVM_REGS_SP        (31 * 8)
 #define GZVM_REGS_PC        (32 * 8)
 #define GZVM_REGS_PSTATE    (33 * 8)
-#define GZVM_REGS_SP_EL1    (34 * 8)  /* offsetof(gzvm_regs, sp_el1)  = 272 */
-#define GZVM_REGS_ELR_EL1   (35 * 8)  /* offsetof(gzvm_regs, elr_el1) = 280 */
-#define GZVM_REGS_SPSR(i)   (36 * 8 + (i) * 8)
-
-#define GZVM_FPREG_OFFSET   (36 * 8 + 5 * 8 + 8)
-#define GZVM_FPREG_VREG(i)  (GZVM_FPREG_OFFSET + (i) * 16)
-#define GZVM_FPREG_FPSR     (GZVM_FPREG_OFFSET + 32 * 16)
-#define GZVM_FPREG_FPCR     (GZVM_FPREG_OFFSET + 32 * 16 + 4)
 
 #define GZVM_SYSREG(op0, op1, crn, crm, op2) \
-    (GZVM_REG_ARM64_SYSREG | ((uint64_t)(op0) << 14) | \
+    (GZVM_REG_ARM64 | GZVM_REG_SIZE_U64 | GZVM_REG_ARM64_SYSREG | \
+     ((uint64_t)(op0) << 14) | \
      ((uint64_t)(op1) << 11) | ((uint64_t)(crn) << 7) | \
      ((uint64_t)(crm) << 3) | ((uint64_t)(op2) << 0))
 
@@ -57,9 +45,13 @@ static void gzvm_arch_set_id_regs(CPUState *cs)
         if (!reg) {
             continue;
         }
-        sysid = GZVM_REG_ARM64_SYSREG |
+        sysid = GZVM_REG_ARM64 | GZVM_REG_SIZE_U64 | GZVM_REG_ARM64_SYSREG |
                 (id_register_sysreg[i] & 0x3fff);
-        gzvm_set_one_reg(cs, sysid, &reg);
+        if (gzvm_set_one_reg(cs, sysid, &reg)) {
+            warn_report_once("gzvm: failed to set CPU ID registers: %s",
+                             strerror(errno));
+            return;
+        }
     }
 }
 
@@ -139,27 +131,6 @@ static int gzvm_get_one_reg_sw(CPUState *cs, uint64_t id, void *target)
     }
 }
 
-static int gzvm_arch_put_fpsimd(CPUState *cs)
-{
-    CPUARMState *env = &ARM_CPU(cs)->env;
-    int i, ret;
-
-    for (i = 0; i < 32; i++) {
-        uint64_t *q = aa64_vfp_qreg(env, i);
-#if HOST_BIG_ENDIAN
-        uint64_t fp_val[2] = { q[1], q[0] };
-        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG128(GZVM_FPREG_VREG(i)),
-                                fp_val);
-#else
-        ret = gzvm_set_one_reg(cs, GZVM_CORE_REG128(GZVM_FPREG_VREG(i)), q);
-#endif
-        if (ret) {
-            return ret;
-        }
-    }
-    return 0;
-}
-
 int gzvm_arch_get_registers(CPUState *cs, int level)
 {
     /*
@@ -187,64 +158,40 @@ int gzvm_arch_get_registers(CPUState *cs, int level)
 int gzvm_arch_put_registers(CPUState *cs, int level)
 {
     uint64_t val;
-    uint32_t fpr;
-    int i;
+    int ret;
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
 
     gzvm_arch_set_id_regs(cs);
 
-    if (!is_a64(env)) {
-        aarch64_sync_32_to_64(env);
+    /*
+     * GenieZone owns EL2.  Match crosvm's GenieZone reset path and enter
+     * the guest at EL1h with interrupts masked.  Secondary vCPUs are kept
+     * powered off by the hypervisor and are completed by PSCI CPU_ON.
+     */
+    val = PSTATE_DAIF | PSTATE_MODE_EL1h;
+    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
+    if (ret) {
+        error_report("gzvm: put_registers: pstate failed: %s", strerror(errno));
+        return ret;
     }
 
-    for (i = 0; i < 31; i++) {
-        gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(i)),
-                          &env->xregs[i]);
+    if (cs->cpu_index != 0) {
+        return 0;
     }
 
-    aarch64_save_sp(env, 1);
-    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP),
-                      &env->sp_el[0]);
-    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SP_EL1),
-                      &env->sp_el[1]);
-
-    if (is_a64(env)) {
-        val = pstate_read(env);
-    } else {
-        val = cpsr_read(env);
-    }
-    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PSTATE), &val);
-
-    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &env->pc);
-
-    gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_ELR_EL1),
-                      &env->elr_el[1]);
-
-    {
-        unsigned int el = arm_current_el(env);
-        if (el > 0 && !is_a64(env)) {
-            i = bank_number(env->uncached_cpsr & CPSR_M);
-            env->banked_spsr[i] = env->spsr;
-        }
-    }
-    for (i = 0; i < GZVM_NR_SPSR; i++) {
-        gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_SPSR(i)),
-                          &env->banked_spsr[i + 1]);
+    val = env->pc;
+    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_PC), &val);
+    if (ret) {
+        error_report("gzvm: put_registers: pc failed: %s", strerror(errno));
+        return ret;
     }
 
-    gzvm_arch_put_fpsimd(cs);
-
-    fpr = vfp_get_fpsr(env);
-    gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPSR), &fpr);
-    fpr = vfp_get_fpcr(env);
-    gzvm_set_one_reg(cs, GZVM_CORE_REG32(GZVM_FPREG_FPCR), &fpr);
-
-    {
-        uint64_t val64 = UINT64_MAX;
-        gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 0, 2), &val64);
-        val64 = 0;
-        gzvm_set_one_reg(cs, GZVM_SYSREG(3, 3, 14, 3, 1), &val64);
+    val = env->xregs[0];
+    ret = gzvm_set_one_reg(cs, GZVM_CORE_REG(GZVM_REGS_X(0)), &val);
+    if (ret) {
+        error_report("gzvm: put_registers: x0 failed: %s", strerror(errno));
+        return ret;
     }
 
     return 0;
