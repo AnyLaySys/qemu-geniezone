@@ -59,10 +59,10 @@ void gzvm_install_sigsegv_handler(void)
 
     /*
      * Block SIGBUS/SIGSEGV in the calling (main) thread so that only
-     * vCPU threads — which call gzvm_unblock_sigsegv() — can trigger
-     * the demand-paging handler.  Other threads (I/O, block, etc.)
-     * inherit the blocked mask via pthread_create and will never
-     * accidentally deliver a GZVM SIGBUS to this handler.
+     * vCPU threads — which call gzvm_init_vcpu_sigsegv() — can
+     * trigger the demand-paging handler.  Other threads (I/O, block,
+     * etc.) inherit the blocked mask via pthread_create and will
+     * never accidentally deliver a GZVM SIGBUS to this handler.
      */
     sigemptyset(&set);
     sigaddset(&set, SIGBUS);
@@ -88,12 +88,4 @@ void gzvm_init_vcpu_sigsegv(void)
     pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 }
 
-void gzvm_unblock_sigsegv(void)
-{
-    sigset_t set;
 
-    sigemptyset(&set);
-    sigaddset(&set, SIGBUS);
-    sigaddset(&set, SIGSEGV);
-    pthread_sigmask(SIG_UNBLOCK, &set, NULL);
-}

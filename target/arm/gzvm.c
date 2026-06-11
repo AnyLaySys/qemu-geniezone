@@ -45,9 +45,12 @@ static void gzvm_arch_set_id_regs(CPUState *cs)
         sysid = GZVM_REG_ARM64 | GZVM_REG_SIZE_U64 | GZVM_REG_ARM64_SYSREG |
                 (id_register_sysreg[i] & 0x3fff);
         if (gzvm_set_one_reg(cs, sysid, &reg)) {
-            warn_report_once("gzvm: failed to set CPU ID registers: %s",
-                             strerror(errno));
-            return;
+            static bool warned;
+            if (!warned) {
+                warn_report("gzvm: failed to set CPU ID register %s: %s",
+                            gzvm_id_reg_names[i], strerror(errno));
+                warned = true;
+            }
         }
     }
 }
@@ -165,14 +168,6 @@ static int gzvm_set_one_reg_err(CPUState *cs, uint64_t reg_id, uint64_t *val,
 
 int gzvm_arch_put_registers(CPUState *cs, int level)
 {
-#ifdef GZVM_SVE_DISABLE
-    ARMCPU *cpu = ARM_CPU(cs);
-    if (FIELD_EX64(cpu->isar.id_aa64pfr0, ID_AA64PFR0, SVE) != 0) {
-        error_report("gzvm: SVE/SME not supported by GZVM kernel driver");
-        return -ENOTSUP;
-    }
-#endif
-
     uint64_t val;
     int ret;
     ARMCPU *cpu = ARM_CPU(cs);
@@ -461,6 +456,11 @@ void arm_cpu_gzvm_set_irq(void *arm_cpu, int irq, int level)
     uint32_t linestate_bit;
     int irq_id;
 
+    if (!arm_feature(env, ARM_FEATURE_EL2) &&
+        (irq == ARM_CPU_VIRQ || irq == ARM_CPU_VFIQ)) {
+        return;
+    }
+
     switch (irq) {
     case ARM_CPU_IRQ:
         irq_id = GZVM_IRQ_CPU_IRQ;
@@ -470,6 +470,22 @@ void arm_cpu_gzvm_set_irq(void *arm_cpu, int irq, int level)
         irq_id = GZVM_IRQ_CPU_FIQ;
         linestate_bit = CPU_INTERRUPT_FIQ;
         break;
+    case ARM_CPU_VIRQ:
+        if (level) {
+            env->irq_line_state |= CPU_INTERRUPT_VIRQ;
+        } else {
+            env->irq_line_state &= ~CPU_INTERRUPT_VIRQ;
+        }
+        arm_cpu_update_virq(cpu);
+        return;
+    case ARM_CPU_VFIQ:
+        if (level) {
+            env->irq_line_state |= CPU_INTERRUPT_VFIQ;
+        } else {
+            env->irq_line_state &= ~CPU_INTERRUPT_VFIQ;
+        }
+        arm_cpu_update_vfiq(cpu);
+        return;
     default:
         g_assert_not_reached();
     }

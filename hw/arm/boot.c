@@ -1260,8 +1260,9 @@ void arm_load_kernel(ARMCPU *cpu, MachineState *ms, struct arm_boot_info *info)
         boot_el = arm_feature(env, ARM_FEATURE_EL2) ? 2 : 1;
     }
 
-    if ((info->psci_conduit == QEMU_PSCI_CONDUIT_HVC && boot_el >= 2) ||
-        (info->psci_conduit == QEMU_PSCI_CONDUIT_SMC && boot_el == 3)) {
+    if (!gzvm_enabled() &&
+        ((info->psci_conduit == QEMU_PSCI_CONDUIT_HVC && boot_el >= 2) ||
+         (info->psci_conduit == QEMU_PSCI_CONDUIT_SMC && boot_el == 3))) {
         info->psci_conduit = QEMU_PSCI_CONDUIT_DISABLED;
     }
 
