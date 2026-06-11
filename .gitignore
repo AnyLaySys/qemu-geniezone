@@ -1,3 +1,19 @@
+# File patterns
+*~
+.*.swp
+.clang-format
+.gdb_history
+.git-submodule-status
+.stgit-*
+/GNUmakefile
+/qemu-bridge-helper
+/qemu-edid
+/qemu-img
+/qemu-io
+/qemu-keymap
+/qemu-nbd
+/qemu-storage-daemon
+/storage-daemon/qemu-storage-daemon
 *.a
 *.ast_raw
 *.depend_raw
@@ -20,21 +36,6 @@
 *.so.*
 *.swo
 *.swp
-*~
-.clang-format
-.gdb_history
-.git-submodule-status
-.stgit-*
-.*.swp
-/GNUmakefile
-/qemu-bridge-helper
-/qemu-edid
-/qemu-img
-/qemu-io
-/qemu-keymap
-/qemu-nbd
-/qemu-storage-daemon
-/storage-daemon/qemu-storage-daemon
 config-all-devices.*
 config-all-disas.*
 config-host.*
@@ -57,8 +58,10 @@ TAGS
 tags
 trace-*.h
 trace-ust*
-trace.h
 trace*-dtrace*
+tests/qemu-iotests/*.out.*
+
+# Directory patterns
 .cache/
 .codegraph/
 .deps/
@@ -75,4 +78,3 @@ scripts/*/__pycache__/
 scripts/oss-fuzz/
 tests/data/uefi-boot-images/
 tests/lcitool/
-tests/qemu-iotests/*.out.*
