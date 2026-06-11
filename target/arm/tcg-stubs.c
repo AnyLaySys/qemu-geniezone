@@ -10,6 +10,7 @@
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include "internals.h"
+#include "hw/intc/arm_gicv5_stream.h"
 
 void write_v7m_exception(CPUARMState *env, uint32_t new_exc)
 {
@@ -45,5 +46,9 @@ void vfp_set_fpcr_to_host(CPUARMState *env, uint32_t val, uint32_t mask)
 }
 
 void gicv5_update_ppi_state(CPUARMState *env, int ppi, bool level)
+{
+}
+
+void gicv5_forward_interrupt(ARMCPU *cpu, GICv5Domain domain)
 {
 }

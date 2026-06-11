@@ -165,6 +165,14 @@ static int gzvm_set_one_reg_err(CPUState *cs, uint64_t reg_id, uint64_t *val,
 
 int gzvm_arch_put_registers(CPUState *cs, int level)
 {
+#ifdef GZVM_SVE_DISABLE
+    ARMCPU *cpu = ARM_CPU(cs);
+    if (FIELD_EX64(cpu->isar.id_aa64pfr0, ID_AA64PFR0, SVE) != 0) {
+        error_report("gzvm: SVE/SME not supported by GZVM kernel driver");
+        return -ENOTSUP;
+    }
+#endif
+
     uint64_t val;
     int ret;
     ARMCPU *cpu = ARM_CPU(cs);
@@ -443,4 +451,40 @@ void gzvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
         SET_IDREG(isar, ID_AA64PFR1, pfr1);
     }
     SET_IDREG(isar, ID_AA64SMFR0, 0);
+}
+
+void arm_cpu_gzvm_set_irq(void *arm_cpu, int irq, int level)
+{
+    ARMCPU *cpu = arm_cpu;
+    CPUARMState *env = &cpu->env;
+    struct gzvm_irq_level irq_level;
+    uint32_t linestate_bit;
+    int irq_id;
+
+    switch (irq) {
+    case ARM_CPU_IRQ:
+        irq_id = GZVM_IRQ_CPU_IRQ;
+        linestate_bit = CPU_INTERRUPT_HARD;
+        break;
+    case ARM_CPU_FIQ:
+        irq_id = GZVM_IRQ_CPU_FIQ;
+        linestate_bit = CPU_INTERRUPT_FIQ;
+        break;
+    default:
+        g_assert_not_reached();
+    }
+
+    if (level) {
+        env->irq_line_state |= linestate_bit;
+    } else {
+        env->irq_line_state &= ~linestate_bit;
+    }
+
+    irq_level.irq = (GZVM_IRQ_TYPE_CPU << GZVM_IRQ_TYPE_SHIFT) | irq_id;
+    irq_level.level = !!level;
+
+    if (gzvm_vm_ioctl(GZVM_IRQ_LINE, &irq_level)) {
+        warn_report("gzvm: GZVM_IRQ_LINE failed for CPU irq=%d level=%d: %s",
+                    irq, level, strerror(errno));
+    }
 }

@@ -49,6 +49,7 @@
 #include "system/qtest.h"
 #include "system/hw_accel.h"
 #include "kvm_arm.h"
+#include "gzvm_arm.h"
 #include "disas/capstone.h"
 #include "fpu/softfloat.h"
 #include "cpregs.h"
@@ -1224,6 +1225,8 @@ static void arm_cpu_initfn(Object *obj)
          * them to maintain the same interface as non-KVM CPUs.
          */
         qdev_init_gpio_in(DEVICE(cpu), arm_cpu_kvm_set_irq, 6);
+    } else if (gzvm_enabled()) {
+        qdev_init_gpio_in(DEVICE(cpu), arm_cpu_gzvm_set_irq, 6);
     } else {
         qdev_init_gpio_in(DEVICE(cpu), arm_cpu_set_irq, 6);
     }

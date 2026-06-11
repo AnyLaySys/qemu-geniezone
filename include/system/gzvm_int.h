@@ -44,7 +44,7 @@ struct GZVCPUState {
 #define GZVCPU(cpu) ((struct GZVCPUState *)(cpu)->accel)
 
 int gzvm_create_vm(void);
-void gzvm_start_vm(void);
+int gzvm_start_vm(void);
 int gzvm_vm_ioctl(int type, void *arg);
 int gzvm_vcpu_ioctl(CPUState *cpu, int type, void *arg);
 void *gzvm_cpu_thread_fn(void *arg);

@@ -39,6 +39,7 @@ arm_user_ss.add(when: 'CONFIG_ARM_COMPATIBLE_SEMIHOSTING',
 
 arm_common_system_ss.add(files('cpu.c'))
 arm_common_system_ss.add(when: 'CONFIG_KVM', if_false: files('kvm-stub.c'))
+arm_common_system_ss.add(when: 'CONFIG_GZVM', if_false: files('gzvm-stub.c'))
 arm_system_ss.add(when: 'CONFIG_GZVM', if_true: files('gzvm.c'))
 arm_common_system_ss.add(when: 'CONFIG_ARM_COMPATIBLE_SEMIHOSTING',
 		                 if_true: files('common-semi-target.c'))

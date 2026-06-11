@@ -15,9 +15,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-if [ "$CLEAN" = 1 ]; then
-    rm -rf build
-fi
+rm -rf build
 
 mkdir -p build
 cd build
@@ -30,11 +28,20 @@ if [ "$ASAN" = 1 ]; then
     EXTRA="$EXTRA -Dc_args=-fsanitize=address -Dc_link_args=-fsanitize=address"
 fi
 
-if [ ! -f meson-info/intro-buildoptions.json ]; then
-    ../configure \
-      --target-list=aarch64-softmmu \
-      --disable-hvf --disable-nitro --disable-whpx \
-      --disable-xen --disable-docs --disable-vde --disable-opengl \
-      $EXTRA
-fi
+../configure \
+  --target-list=aarch64-softmmu \
+  --enable-gzvm \
+  --disable-tcg --disable-kvm \
+  --disable-hvf --disable-whpx --disable-nitro --disable-mshv --disable-nvmm \
+  --disable-xen \
+  --disable-opengl --disable-virglrenderer --disable-docs \
+  --disable-vde \
+  --disable-curl --disable-libiscsi --disable-libnfs --disable-rbd \
+  --disable-libssh \
+  --disable-bzip2 --disable-lzfse --disable-lzo --disable-snappy \
+  --disable-multiprocess \
+  --disable-vhost-kernel --disable-vhost-net --disable-vhost-user \
+  --disable-vhost-user-blk-server --disable-vhost-vdpa --disable-vhost-crypto \
+  $EXTRA
+
 exec make -j$(nproc)

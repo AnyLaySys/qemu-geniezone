@@ -118,18 +118,35 @@ static void gzvm_remove_slot_from_sorted_ids(GZVMState *s, gzvm_slot *slot)
     }
 }
 
-static int gzvm_remove_mem_slot_locked(GZVMState *s, gzvm_slot *slot)
+static int
+gzvm_set_memory_region_locked(GZVMState *s, uint32_t slot, uint32_t flags,
+                              uint64_t gpa, uint64_t size, void *hva)
 {
     struct gzvm_userspace_memory_region gumr = {
-        .slot = slot->id,
-        .flags = 0,
-        .guest_phys_addr = slot->start,
-        .memory_size = 0,
-        .userspace_addr = (__u64)(uintptr_t)slot->mem,
+        .slot = slot,
+        .flags = flags,
+        .guest_phys_addr = gpa,
+        .memory_size = size,
+        .userspace_addr = (__u64)(uintptr_t)hva,
     };
+    return gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
+}
+
+static void gzvm_mem_slot_deactivate_locked(GZVMState *s, gzvm_slot *slot)
+{
+    gzvm_remove_slot_from_sorted_ids(s, slot);
+    slot->size = 0;
+    slot->mem = NULL;
+    slot->start = 0;
+    slot->flags = 0;
+}
+
+static int gzvm_remove_mem_slot_locked(GZVMState *s, gzvm_slot *slot)
+{
     int ret;
 
-    ret = gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
+    ret = gzvm_set_memory_region_locked(s, slot->id, 0,
+                                        slot->start, 0, slot->mem);
     if (ret) {
         error_report("gzvm: remove memory slot %u failed: %s (errno=%d)",
                      slot->id, strerror(errno), errno);
@@ -137,11 +154,7 @@ static int gzvm_remove_mem_slot_locked(GZVMState *s, gzvm_slot *slot)
     }
     trace_gzvm_del_mem_slot(slot->id, slot->start, slot->size);
 
-    gzvm_remove_slot_from_sorted_ids(s, slot);
-    slot->size = 0;
-    slot->mem = NULL;
-    slot->start = 0;
-    slot->flags = 0;
+    gzvm_mem_slot_deactivate_locked(s, slot);
     return 0;
 }
 
@@ -174,7 +187,6 @@ static int gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa,
                   uint32_t flags)
 {
     gzvm_slot *slot;
-    struct gzvm_userspace_memory_region gumr;
     int ret;
 
     slot = gzvm_get_free_slot(s);
@@ -183,13 +195,8 @@ static int gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa,
         return -ENOSPC;
     }
 
-    gumr.slot = slot->id;
-    gumr.flags = flags;
-    gumr.guest_phys_addr = gpa;
-    gumr.memory_size = size;
-    gumr.userspace_addr = (__u64)(uintptr_t)hva;
-
-    ret = gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
+    ret = gzvm_set_memory_region_locked(s, slot->id, flags,
+                                        gpa, size, hva);
     trace_gzvm_add_mem_slot(slot->id, gpa, size, hva, flags);
     if (ret) {
         error_report("gzvm: GZVM_SET_USER_MEMORY_REGION failed: %s (errno=%d)",

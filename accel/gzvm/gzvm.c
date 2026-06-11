@@ -132,7 +132,7 @@ void *gzvm_cpu_thread_fn(void *arg)
     current_cpu = cpu;
 
     gzvm_init_cpu_signals();
-    gzvm_unblock_sigsegv();
+    gzvm_init_vcpu_sigsegv();
 
     ret = gzvm_init_vcpu(cpu);
     if (ret) {

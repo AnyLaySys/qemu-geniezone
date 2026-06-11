@@ -53,17 +53,9 @@ static void gzvm_sigsegv_handler(int sig, siginfo_t *si, void *ctx)
 
 void gzvm_install_sigsegv_handler(void)
 {
-    struct sigaction sa;
     sigset_t set;
 
     gzvm_signal_page_size = qemu_real_host_page_size();
-
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = gzvm_sigsegv_handler;
-    sa.sa_flags = SA_SIGINFO | SA_RESTART;
-    sigfillset(&sa.sa_mask);
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
 
     /*
      * Block SIGBUS/SIGSEGV in the calling (main) thread so that only
@@ -76,6 +68,24 @@ void gzvm_install_sigsegv_handler(void)
     sigaddset(&set, SIGBUS);
     sigaddset(&set, SIGSEGV);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
+}
+
+void gzvm_init_vcpu_sigsegv(void)
+{
+    struct sigaction sa;
+    sigset_t set;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = gzvm_sigsegv_handler;
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigfillset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+
+    sigemptyset(&set);
+    sigaddset(&set, SIGBUS);
+    sigaddset(&set, SIGSEGV);
+    pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 }
 
 void gzvm_unblock_sigsegv(void)

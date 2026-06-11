@@ -35,28 +35,17 @@ static gzvm_slot *gzvm_find_slot_for_mmio(hwaddr addr, hwaddr *slot_addr_out)
         return slot;
     }
 
-    /*
-     * Workaround: on some GenieZone kernel versions the hypervisor may
-     * misreport the IPA by encoding bit 30 instead of bit 26 (e.g. IPA
-     * 0x4XXXXXXX instead of 0x04XXXXXX).  This appears to be a
-     * Mediatek-specific issue with early GZVM firmware.  When the
-     * standard lookup fails, try the corrected address.
-     *
-     * Remove this once the kernel driver IPA reporting is verified
-     * correct across all GenieZone platforms.
-     */
+#if defined(GZVM_IPA_WORKAROUND)
     if ((addr >> 28) == 0x4) {
         hwaddr corrected = (addr & 0x0FFFFFFF) | 0x04000000;
         slot = gzvm_find_slot_by_addr(corrected);
         if (slot) {
             *slot_addr_out = corrected;
-            warn_report_once("gzvm: MMIO IPA corrected from 0x%"
-                             PRIx64 " to 0x%" PRIx64
-                             " (bit-30/bit-26 workaround)",
-                             addr, corrected);
+            warn_report_once("gzvm: MMIO IPA corrected from 0x%" PRIx64 " to 0x%" PRIx64 " (bit-30/bit-26 workaround)", addr, corrected);
             return slot;
         }
     }
+#endif
     return NULL;
 }
 
@@ -73,6 +62,11 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
     }
 
     if (run->mmio.size > 8) {
+        warn_report("gzvm: large MMIO %s at 0x%" PRIx64 " size=%" PRIu64
+                     " (max 8 bytes supported, treated as RAZ/WI)",
+                     run->mmio.is_write ? "write" : "read",
+                     (uint64_t)run->mmio.phys_addr,
+                     (uint64_t)run->mmio.size);
         return 0;
     }
 

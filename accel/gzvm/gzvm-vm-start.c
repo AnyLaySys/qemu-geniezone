@@ -5,14 +5,14 @@
 #include "gzvm-internal.h"
 #include "trace.h"
 
-void gzvm_start_vm(void)
+int gzvm_start_vm(void)
 {
     AccelState *accel = current_accel();
     GZVMState *s;
     int ret;
 
     if (!accel) {
-        return;
+        return -1;
     }
     s = GZVM_STATE(accel);
 
@@ -28,7 +28,7 @@ void gzvm_start_vm(void)
             if (ret < 0) {
                 error_report("gzvm: GZVM_ENABLE_CAP PVMFW_GPA failed: %s (errno=%d)",
                              strerror(errno), errno);
-                exit(1);
+                return -1;
             }
         }
 
@@ -40,7 +40,7 @@ void gzvm_start_vm(void)
         if (ret < 0) {
             error_report("gzvm: GZVM_ENABLE_CAP PROTECTED_VM failed: %s (errno=%d)",
                          strerror(errno), errno);
-            exit(1);
+            return -1;
         }
     }
 
@@ -53,7 +53,9 @@ void gzvm_start_vm(void)
         if (ret != 0) {
             error_report("gzvm: GZVM_SET_DTB_CONFIG failed: %s (errno=%d)",
                          strerror(errno), errno);
-            exit(1);
+            return -1;
         }
     }
+
+    return 0;
 }

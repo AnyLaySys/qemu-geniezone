@@ -26,10 +26,21 @@ typedef struct GZVMARMGICv3Class GZVMARMGICv3Class;
 DECLARE_OBJ_CHECKERS(GICv3State, GZVMARMGICv3Class,
                      GZVM_ARM_GICV3, TYPE_GZVM_ARM_GICV3)
 
+static bool gzvm_irq_is_enabled(GICv3State *s, GICv3CPUState *cs,
+                                 int irqtype, int irq)
+{
+    if (irqtype == GZVM_IRQ_TYPE_SPI) {
+        return gicv3_gicd_enabled_test(s, irq);
+    }
+    /* PPIs/SGIs use per-CPU GICR registers */
+    return (cs->gicr_ienabler0 >> irq) & 1;
+}
+
 static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
 {
     GICv3State *s = ARM_GICV3_COMMON(opaque);
     struct gzvm_irq_level irq_level;
+    GICv3CPUState *cs;
     int irqtype;
     int cpu;
 
@@ -42,6 +53,33 @@ static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
         irq -= s->num_irq - GIC_INTERNAL;
         cpu = irq / GIC_INTERNAL;
         irq %= GIC_INTERNAL;
+    }
+
+    cs = &s->cpu[cpu];
+
+    /*
+     * Track the level in QEMU's GIC model so that gicv3_update()
+     * can see pending interrupts when they become enabled later.
+     */
+    if (irqtype == GZVM_IRQ_TYPE_SPI) {
+        gicv3_gicd_level_replace(s, irq, level);
+    } else {
+        if (level) {
+            cs->level |= (1U << irq);
+        } else {
+            cs->level &= ~(1U << irq);
+        }
+    }
+
+    /*
+     * Only inject enabled interrupts to the GZVM kernel.
+     * If the interrupt is disabled, skip GZVM_IRQ_LINE — the level
+     * is already tracked above.  When the guest later enables it,
+     * gicv3_update() → gicv3_cpuif_update() → parent_irq will
+     * notify the GZVM kernel via arm_cpu_gzvm_set_irq.
+     */
+    if (!gzvm_irq_is_enabled(s, cs, irqtype, irq)) {
+        return;
     }
 
     irq_level.irq = (irqtype << GZVM_IRQ_TYPE_SHIFT) |
