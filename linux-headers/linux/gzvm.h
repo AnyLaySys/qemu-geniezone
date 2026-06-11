@@ -7,7 +7,7 @@ SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 #include <stdint.h>
 #include <sys/ioctl.h>
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__)
 #include <linux/types.h>
 #else
 typedef uint8_t  __u8;
