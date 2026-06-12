@@ -39,6 +39,7 @@
 #include "qemu/range.h"
 #include "qemu/units.h"
 #include "system/kvm.h"
+#include "system/accel-irq.h"
 #include "system/runstate.h"
 #include "pci.h"
 #include "trace.h"
@@ -155,9 +156,9 @@ static bool vfio_intx_enable_kvm(VFIOPCIDevice *vdev, Error **errp)
     PCIDevice *pdev = PCI_DEVICE(vdev);
     int irq_fd = event_notifier_get_fd(&vdev->intx.interrupt);
 
-    if (vdev->no_kvm_intx || !kvm_irqfds_enabled() ||
+    if (vdev->no_kvm_intx || !accel_irqfds_enabled() ||
         vdev->intx.route.mode != PCI_INTX_ENABLED ||
-        !kvm_resamplefds_enabled()) {
+        !accel_resamplefds_enabled()) {
         return true;
     }
 
@@ -172,8 +173,7 @@ static bool vfio_intx_enable_kvm(VFIOPCIDevice *vdev, Error **errp)
         goto fail;
     }
 
-    if (kvm_irqchip_add_irqfd_notifier_gsi(kvm_state,
-                                           &vdev->intx.interrupt,
+    if (accel_irqchip_add_irqfd_notifier_gsi(&vdev->intx.interrupt,
                                            &vdev->intx.unmask,
                                            vdev->intx.route.irq)) {
         error_setg_errno(errp, errno, "failed to setup resample irqfd");
@@ -197,8 +197,8 @@ static bool vfio_intx_enable_kvm(VFIOPCIDevice *vdev, Error **errp)
     return true;
 
 fail_vfio:
-    kvm_irqchip_remove_irqfd_notifier_gsi(kvm_state, &vdev->intx.interrupt,
-                                          vdev->intx.route.irq);
+    accel_irqchip_remove_irqfd_notifier_gsi(&vdev->intx.interrupt,
+                                           vdev->intx.route.irq);
 fail_irqfd:
     vfio_notifier_cleanup(vdev, &vdev->intx.unmask, "intx-unmask", 0);
 fail:
@@ -209,9 +209,9 @@ fail:
 
 static bool vfio_cpr_intx_enable_kvm(VFIOPCIDevice *vdev, Error **errp)
 {
-    if (vdev->no_kvm_intx || !kvm_irqfds_enabled() ||
+    if (vdev->no_kvm_intx || !accel_irqfds_enabled() ||
         vdev->intx.route.mode != PCI_INTX_ENABLED ||
-        !kvm_resamplefds_enabled()) {
+        !accel_resamplefds_enabled()) {
         return true;
     }
 
@@ -219,7 +219,7 @@ static bool vfio_cpr_intx_enable_kvm(VFIOPCIDevice *vdev, Error **errp)
         return false;
     }
 
-    if (kvm_irqchip_add_irqfd_notifier_gsi(kvm_state,
+    if (accel_irqchip_add_irqfd_notifier_gsi(
                                            &vdev->intx.interrupt,
                                            &vdev->intx.unmask,
                                            vdev->intx.route.irq)) {
@@ -250,7 +250,7 @@ static void vfio_intx_disable_kvm(VFIOPCIDevice *vdev)
     pci_irq_deassert(pdev);
 
     /* Tell KVM to stop listening for an INTx irqfd */
-    if (kvm_irqchip_remove_irqfd_notifier_gsi(kvm_state, &vdev->intx.interrupt,
+    if (accel_irqchip_remove_irqfd_notifier_gsi(&vdev->intx.interrupt,
                                               vdev->intx.route.irq)) {
         error_report("vfio: Error: Failed to disable INTx irqfd: %m");
     }
@@ -277,7 +277,7 @@ static void vfio_intx_update(VFIOPCIDevice *vdev, PCIINTxRoute *route)
     trace_vfio_intx_update(vdev->vbasedev.name,
                            vdev->intx.route.irq, route->irq);
 
-    if (kvm_enabled()) {
+    if (accel_irqfds_enabled()) {
         vfio_intx_disable_kvm(vdev);
     }
 
@@ -287,7 +287,7 @@ static void vfio_intx_update(VFIOPCIDevice *vdev, PCIINTxRoute *route)
         return;
     }
 
-    if (kvm_enabled() && !vfio_intx_enable_kvm(vdev, &err)) {
+    if (accel_irqfds_enabled() && !vfio_intx_enable_kvm(vdev, &err)) {
         warn_reportf_err(err, VFIO_MSG_PREFIX, vdev->vbasedev.name);
     }
 
@@ -346,7 +346,7 @@ static bool vfio_intx_enable(VFIOPCIDevice *vdev, Error **errp)
      * Only conditional to avoid generating error messages on platforms
      * where we won't actually use the result anyway.
      */
-    if (kvm_enabled() && kvm_irqfds_enabled() && kvm_resamplefds_enabled()) {
+    if (accel_irqfds_enabled() && accel_resamplefds_enabled()) {
         vdev->intx.route = pci_device_route_intx_to_irq(pdev,
                                                         vdev->intx.pin);
     }
@@ -360,7 +360,7 @@ static bool vfio_intx_enable(VFIOPCIDevice *vdev, Error **errp)
 
 
     if (cpr_is_incoming()) {
-        if (kvm_enabled() && !vfio_cpr_intx_enable_kvm(vdev, &err)) {
+        if (accel_irqfds_enabled() && !vfio_cpr_intx_enable_kvm(vdev, &err)) {
             warn_reportf_err(err, VFIO_MSG_PREFIX, vdev->vbasedev.name);
         }
         goto skip_signaling;
@@ -373,7 +373,7 @@ static bool vfio_intx_enable(VFIOPCIDevice *vdev, Error **errp)
         return false;
     }
 
-    if (kvm_enabled() && !vfio_intx_enable_kvm(vdev, &err)) {
+    if (accel_irqfds_enabled() && !vfio_intx_enable_kvm(vdev, &err)) {
         warn_reportf_err(err, VFIO_MSG_PREFIX, vdev->vbasedev.name);
     }
 
@@ -390,7 +390,7 @@ static void vfio_intx_disable(VFIOPCIDevice *vdev)
     int fd;
 
     timer_del(vdev->intx.mmap_timer);
-    if (kvm_enabled()) {
+    if (accel_irqfds_enabled()) {
         vfio_intx_disable_kvm(vdev);
     }
     vfio_device_irq_disable(&vdev->vbasedev, VFIO_PCI_INTX_IRQ_INDEX);
@@ -586,7 +586,7 @@ static void vfio_connect_kvm_msi_virq(VFIOMSIVector *vector, int nr)
         goto fail_notifier;
     }
 
-    if (kvm_irqchip_add_irqfd_notifier_gsi(kvm_state, &vector->kvm_interrupt,
+    if (accel_irqchip_add_irqfd_notifier_gsi(&vector->kvm_interrupt,
                                            NULL, vector->virq) < 0) {
         goto fail_kvm;
     }
@@ -603,8 +603,8 @@ fail_notifier:
 static void vfio_remove_kvm_msi_virq(VFIOPCIDevice *vdev, VFIOMSIVector *vector,
                                      int nr)
 {
-    kvm_irqchip_remove_irqfd_notifier_gsi(kvm_state, &vector->kvm_interrupt,
-                                          vector->virq);
+    accel_irqchip_remove_irqfd_notifier_gsi(&vector->kvm_interrupt,
+                                           vector->virq);
     kvm_irqchip_release_virq(kvm_state, vector->virq);
     vector->virq = -1;
     vfio_notifier_cleanup(vdev, &vector->kvm_interrupt, "kvm_interrupt", nr);

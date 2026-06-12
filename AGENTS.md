@@ -82,7 +82,7 @@ CodeGraph 提供了 8 个 MCP 工具，按使用频率排列：
 | `accel/gzvm/gzvm-vcpu.c` | vCPU IPI 信号 |
 | `accel/gzvm/gzvm-vm-start.c` | 受保护 VM 启动序列 |
 | `target/arm/gzvm.c` | ARM 寄存器同步、CPU feature 探测 |
-| `hw/intc/arm_gicv3_gzvm.c` | GZVM GICv3 后端 |
+| `hw/intc/arm_gicv3_gzvm.c` | GZVM GICv3 后端（内核 VGIC，QEMU 做转发） |
 | `hw/arm/virt.c` | 15 个 `gzvm_enabled()` 集成点 |
 
 ### 构建
@@ -109,16 +109,17 @@ CodeGraph 提供了 8 个 MCP 工具，按使用频率排列：
 
 1. **抽 slot 删除逻辑** (`accel/gzvm/gzvm-mem.c`) — 重复代码，~30 行净减少
 2. **信号处理器 per-VCPU-thread** (`accel/gzvm/gzvm-signal.c`) — 全局 SIGBUS handler 会抢其他子系统信号
-3. **SVE/SME 寄存器同步** (`target/arm/gzvm.c`) — host 有 SVE 时 guest 用 SVE 指令会挂
+3. ~~**SVE/SME 寄存器同步**~~ — ID regs 已 masked，`sve`/`sme` 属性已移除。等内核 UAPI 加 `GZVM_REG_ARM64_SVE`
+4. **PMU 虚拟化** (`target/arm/gzvm.c` + `hw/arm/virt.c`) — host 有 PMU 时 guest PMU 中断无法送达，需内核 + QEMU 配合
 
 ### 中期 — 功能补齐
 
-4. **Dirty page tracking** — migration 的 blocker，需要内核先支持
-5. **In-kernel GIC** — 等内核支持 VGIC 设备后切换
-6. **PCIe MSI over GICv2m** — 验证 GICv2m 路径
+5. **Dirty page tracking** — migration 的 blocker，需要内核先支持
+6. ~~**In-kernel GIC**~~ — ✅ **已有内核 VGICv3**（2025-06 确认），`gzvm_gic_ops` 已改为 `NULL`
+7. **`GZVM_GET_ONE_REG` 内核支持** — 让 QEMU 能从内核读取真实寄存器值（目前返回 `-EOPNOTSUPP`）
 
 ### 长期 — 架构改进
 
-7. **Guest debug / gdbstub**
-8. **把 `virt_gzvm_init()` 抽出 `virt.c`**
-9. **PMU 虚拟化**
+8. **Guest debug / gdbstub**
+9. **把 `virt_gzvm_init()` 抽出 `virt.c`**
+10. **PCIe MSI over GICv2m** — 验证 GICv2m 路径（irqfd 已实现）

@@ -11,8 +11,8 @@
 #include "gzvm-internal.h"
 #include "trace.h"
 
-#define gzvm_slots_lock(s)    qemu_mutex_lock(&s->slots_lock)
-#define gzvm_slots_unlock(s)  qemu_mutex_unlock(&s->slots_lock)
+#define gzvm_slots_lock(s)    qemu_mutex_lock(&(s)->slots_lock)
+#define gzvm_slots_unlock(s)  qemu_mutex_unlock(&(s)->slots_lock)
 
 /*
  * Binary-search sorted_ids[] for the first slot whose start >= addr.
@@ -20,8 +20,8 @@
  */
 static int gzvm_find_first_ge(GZVMState *s, uint64_t addr)
 {
-    int lo = 0, hi = s->nr_active_slots - 1;
-    int first_ge = s->nr_active_slots;
+    int lo = 0, hi = (int)s->nr_active_slots - 1;
+    int first_ge = (int)s->nr_active_slots;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
         gzvm_slot *slot = &s->slots[s->sorted_ids[mid]];
@@ -80,7 +80,7 @@ gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
         return NULL;
     }
 
-    int lo = 0, hi = s->nr_active_slots - 1;
+    int lo = 0, hi = (int)s->nr_active_slots - 1;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
         gzvm_slot *slot = &s->slots[s->sorted_ids[mid]];

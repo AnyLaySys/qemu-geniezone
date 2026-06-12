@@ -14,10 +14,27 @@
 #include "hw/pci/msi.h"
 #include "system/kvm.h"
 #include "system/mshv.h"
+#include "system/gzvm.h"
 
 static inline bool accel_msi_via_irqfd_enabled(void)
 {
-    return mshv_msi_via_irqfd_enabled() || kvm_msi_via_irqfd_enabled();
+    return gzvm_msi_via_irqfd_enabled() ||
+           mshv_msi_via_irqfd_enabled() ||
+           kvm_msi_via_irqfd_enabled();
+}
+
+static inline bool accel_irqfds_enabled(void)
+{
+    return kvm_irqfds_enabled() ||
+           gzvm_msi_via_irqfd_enabled() ||
+           mshv_msi_via_irqfd_enabled();
+}
+
+static inline bool accel_resamplefds_enabled(void)
+{
+    return kvm_resamplefds_enabled() ||
+           gzvm_msi_via_irqfd_enabled() ||
+           mshv_msi_via_irqfd_enabled();
 }
 
 static inline bool accel_irqchip_is_split(void)

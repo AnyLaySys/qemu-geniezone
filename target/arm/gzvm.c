@@ -212,33 +212,34 @@ static uint32_t gzvm_arm_read_midr(void)
 {
     static uint32_t cached_midr;
     static bool cached;
-    FILE *f;
+    g_autofree char *contents = NULL;
+    g_auto(GStrv) lines = NULL;
     uint32_t midr = 0x410fd810;
-    char line[256];
 
     if (cached) {
         return cached_midr;
     }
 
-    f = fopen("/proc/cpuinfo", "r");
-    if (!f) {
+    if (!g_file_get_contents("/proc/cpuinfo", &contents, NULL, NULL)) {
         cached_midr = midr;
         cached = true;
         return midr;
     }
-    while (fgets(line, sizeof(line), f)) {
+
+    lines = g_strsplit(contents, "\n", -1);
+    for (int i = 0; lines[i]; i++) {
         unsigned long val;
-        if (sscanf(line, "CPU implementer : 0x%lx", &val) == 1) {
+        if (sscanf(lines[i], "CPU implementer : 0x%lx", &val) == 1) {
             midr = (midr & ~0xff000000) | ((val & 0xff) << 24);
-        } else if (sscanf(line, "CPU variant : 0x%lx", &val) == 1) {
+        } else if (sscanf(lines[i], "CPU variant : 0x%lx", &val) == 1) {
             midr = (midr & ~0x00f00000) | ((val & 0xf) << 20);
-        } else if (sscanf(line, "CPU part : 0x%lx", &val) == 1) {
+        } else if (sscanf(lines[i], "CPU part : 0x%lx", &val) == 1) {
             midr = (midr & ~0x000fff00) | ((val & 0xfff) << 8);
-        } else if (sscanf(line, "CPU revision : %lu", &val) == 1) {
+        } else if (sscanf(lines[i], "CPU revision : %lu", &val) == 1) {
             midr = (midr & ~0x0000000f) | (val & 0xf);
         }
     }
-    fclose(f);
+
     cached_midr = midr;
     cached = true;
     return midr;
@@ -446,6 +447,20 @@ void gzvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
         SET_IDREG(isar, ID_AA64PFR1, pfr1);
     }
     SET_IDREG(isar, ID_AA64SMFR0, 0);
+
+    /*
+     * GZVM kernel has no PMU interrupt routing UAPI (no
+     * equivalent of KVM_ARM_VCPU_PMU_V3_CTRL), so PMU overflow
+     * interrupts cannot reach the guest.  Mask PMU out until
+     * kernel support arrives.
+     */
+    {
+        uint64_t dfr0 = GET_IDREG(isar, ID_AA64DFR0);
+        dfr0 = FIELD_DP64(dfr0, ID_AA64DFR0, PMUVER, 0);
+        SET_IDREG(isar, ID_AA64DFR0, dfr0);
+    }
+    env->features &= ~BIT(ARM_FEATURE_PMU);
+    cpu->has_pmu = false;
 }
 
 void arm_cpu_gzvm_set_irq(void *arm_cpu, int irq, int level)

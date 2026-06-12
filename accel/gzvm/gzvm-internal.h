@@ -28,6 +28,8 @@ int gzvm_handle_internal_error(CPUState *cpu, struct gzvm_vcpu_run *run);
 int gzvm_handle_unknown_exit(CPUState *cpu, struct gzvm_vcpu_run *run);
 
 /* gzvm-irq.c */
+int gzvm_add_irqfd(EventNotifier *n, EventNotifier *rn, int gsi);
+int gzvm_remove_irqfd(EventNotifier *n, int gsi);
 extern MemoryListener gzvm_ioeventfd_listener;
 
 #endif

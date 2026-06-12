@@ -21,4 +21,6 @@ void gzvm_set_gic_bases(uint64_t dist_base, uint64_t redist_base,
                         uint64_t redist_size);
 void gzvm_set_ram_base(uint64_t base);
 
+#define gzvm_msi_via_irqfd_enabled() gzvm_enabled()
+
 #endif

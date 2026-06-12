@@ -8,6 +8,7 @@
 #include "system/gzvm_int.h"
 #include "linux-headers/linux/gzvm.h"
 #include "gzvm-internal.h"
+#include "trace/trace-accel_gzvm.h"
 
 static int
 gzvm_set_ioeventfd_mmio(int fd, hwaddr addr, uint32_t size, uint64_t data,
@@ -66,6 +67,35 @@ gzvm_mem_ioeventfd_del(MemoryListener *listener, MemoryRegionSection *section,
                      (uint64_t)section->offset_within_address_space,
                      strerror(errno));
     }
+}
+
+int gzvm_add_irqfd(EventNotifier *n, EventNotifier *rn, int gsi)
+{
+    struct gzvm_irqfd irqfd = {
+        .fd = event_notifier_get_fd(n),
+        .gsi = gsi,
+        .flags = 0,
+    };
+
+    if (rn) {
+        irqfd.flags |= GZVM_IRQFD_FLAG_RESAMPLE;
+        irqfd.resamplefd = event_notifier_get_fd(rn);
+    }
+
+    trace_gzvm_add_irqfd(irqfd.fd, gsi);
+    return gzvm_vm_ioctl(GZVM_IRQFD, &irqfd);
+}
+
+int gzvm_remove_irqfd(EventNotifier *n, int gsi)
+{
+    struct gzvm_irqfd irqfd = {
+        .fd = event_notifier_get_fd(n),
+        .gsi = gsi,
+        .flags = GZVM_IRQFD_FLAG_DEASSIGN,
+    };
+
+    trace_gzvm_add_irqfd(irqfd.fd, gsi);
+    return gzvm_vm_ioctl(GZVM_IRQFD, &irqfd);
 }
 
 MemoryListener gzvm_ioeventfd_listener = {

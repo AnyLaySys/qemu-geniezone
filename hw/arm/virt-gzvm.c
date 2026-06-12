@@ -51,8 +51,11 @@ void virt_gzvm_disable_highmem(VirtMachineState *vms)
         return;
     }
 
-    vms->highmem_ecam = false;
-    vms->highmem_mmio = false;
+    /*
+     * GZVM supports highmem PCI ECAM and MMIO — the guest accesses
+     * these via MMIO traps handled by QEMU.  No kernel-side memory
+     * slot registration is needed.  Let the user's choice stand.
+     */
 }
 
 void virt_gzvm_create_virtio_gpu(VirtMachineState *vms)

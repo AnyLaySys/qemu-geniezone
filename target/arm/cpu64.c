@@ -864,8 +864,17 @@ static void aarch64_host_initfn(Object *obj)
 #if defined(CONFIG_GZVM)
     if (gzvm_enabled()) {
         gzvm_arm_set_cpu_features_from_host(cpu);
-        aarch64_add_sve_properties(obj);
-        aarch64_add_sme_properties(obj);
+        /*
+         * GZVM kernel driver has no SVE/SME register type yet
+         * (no GZVM_REG_ARM64_SVE in the UAPI).  The features are
+         * already masked out of the ID registers; do NOT register
+         * SVE/SME object properties so that -cpu host,sve=on fails
+         * with a clear "property not found" error instead of being
+         * silently ignored.
+         */
+        if (arm_feature(&cpu->env, ARM_FEATURE_AARCH64)) {
+            aarch64_add_pauth_properties(obj);
+        }
         return;
     }
 #endif

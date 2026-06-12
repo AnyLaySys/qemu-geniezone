@@ -14,7 +14,9 @@
 
 #include "system/kvm.h"
 #include "system/mshv.h"
+#include "system/gzvm.h"
 #include "system/accel-irq.h"
+#include "accel/gzvm/gzvm-internal.h"
 
 int accel_irqchip_add_msi_route(KVMRouteChange *c, int vector, PCIDevice *dev)
 {
@@ -81,6 +83,9 @@ void accel_irqchip_release_virq(int virq)
 int accel_irqchip_add_irqfd_notifier_gsi(EventNotifier *n, EventNotifier *rn,
                                          int virq)
 {
+    if (gzvm_enabled()) {
+        return gzvm_add_irqfd(n, rn, virq);
+    }
 #ifdef CONFIG_MSHV_IS_POSSIBLE
     if (mshv_msi_via_irqfd_enabled()) {
         return mshv_irqchip_add_irqfd_notifier_gsi(n, rn, virq);
@@ -94,6 +99,9 @@ int accel_irqchip_add_irqfd_notifier_gsi(EventNotifier *n, EventNotifier *rn,
 
 int accel_irqchip_remove_irqfd_notifier_gsi(EventNotifier *n, int virq)
 {
+    if (gzvm_enabled()) {
+        return gzvm_remove_irqfd(n, virq);
+    }
 #ifdef CONFIG_MSHV_IS_POSSIBLE
     if (mshv_msi_via_irqfd_enabled()) {
         return mshv_irqchip_remove_irqfd_notifier_gsi(n, virq);

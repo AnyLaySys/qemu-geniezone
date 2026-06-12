@@ -2384,6 +2384,8 @@ static void virt_build_smbios(VirtMachineState *vms)
 
     if (kvm_enabled()) {
         product = "KVM Virtual Machine";
+    } else if (gzvm_enabled()) {
+        product = "GZVM Virtual Machine";
     }
 
     smbios_set_defaults("QEMU", product, mc->name);
@@ -2596,12 +2598,12 @@ static VirtGICType finalize_gic_version_do(const char *accel_name,
     /* Convert host/max/nosel to GIC version number */
     switch (gic_version) {
     case VIRT_GIC_VERSION_HOST:
-        if (!kvm_enabled()) {
-            error_report("gic-version=host requires KVM");
+        if (!kvm_enabled() && !gzvm_enabled()) {
+            error_report("gic-version=host requires KVM or GZVM");
             exit(1);
         }
 
-        /* For KVM, gic-version=host means gic-version=max */
+        /* For KVM/GZVM, gic-version=host means gic-version=max */
         return finalize_gic_version_do(accel_name, VIRT_GIC_VERSION_MAX,
                                        gics_supported, max_cpus);
     case VIRT_GIC_VERSION_MAX:
@@ -2872,6 +2874,10 @@ static void virt_post_cpus_gic_realized(VirtMachineState *vms,
             }
         }
     } else {
+        if (gzvm_enabled() && pmu) {
+            warn_report_once("GZVM: PMU masked (no kernel PMU interrupt "
+                             "routing UAPI; use pmu=off to suppress)");
+        }
         if (aarch64 && vms->highmem) {
             int requested_pa_size = 64 - clz64(vms->highest_gpa);
             int pamax = arm_pamax(ARM_CPU(first_cpu));
@@ -3222,6 +3228,11 @@ static void machvirt_init(MachineState *machine)
 
     vms->highmem_ecam &= (!firmware_loaded || aarch64);
     virt_gzvm_disable_highmem(vms);
+
+    if (gzvm_enabled() && vms->ras) {
+        warn_report("GZVM: RAS not supported (no MCE error injection path; "
+                     "guest will not receive hardware error notifications)");
+    }
 
     create_rtc(vms);
 
@@ -3882,6 +3893,11 @@ static void virt_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
         if (object_property_get_bool(OBJECT(dev), "accel", &error_abort)) {
             hwaddr db_start = 0;
 
+            if (gzvm_enabled()) {
+                error_setg(errp, "SMMUv3 accel=on is not supported "
+                           "on GZVM");
+                return;
+            }
             if (!kvm_enabled() || !kvm_irqchip_in_kernel()) {
                 error_setg(errp, "SMMUv3 accel=on requires KVM with "
                            "kernel-irqchip=on support");

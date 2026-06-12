@@ -26,16 +26,6 @@ typedef struct GZVMARMGICv3Class GZVMARMGICv3Class;
 DECLARE_OBJ_CHECKERS(GICv3State, GZVMARMGICv3Class,
                      GZVM_ARM_GICV3, TYPE_GZVM_ARM_GICV3)
 
-static bool gzvm_irq_is_enabled(GICv3State *s, GICv3CPUState *cs,
-                                 int irqtype, int irq)
-{
-    if (irqtype == GZVM_IRQ_TYPE_SPI) {
-        return gicv3_gicd_enabled_test(s, irq);
-    }
-    /* PPIs/SGIs use per-CPU GICR registers */
-    return (cs->gicr_ienabler0 >> irq) & 1;
-}
-
 static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
 {
     GICv3State *s = ARM_GICV3_COMMON(opaque);
@@ -72,15 +62,12 @@ static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
     }
 
     /*
-     * Only inject enabled interrupts to the GZVM kernel.
-     * If the interrupt is disabled, skip GZVM_IRQ_LINE — the level
-     * is already tracked above.  When the guest later enables it,
-     * gicv3_update() → gicv3_cpuif_update() → parent_irq will
-     * notify the GZVM kernel via arm_cpu_gzvm_set_irq.
+     * The kernel VGIC handles interrupt enable/disable itself.
+     * Always inject via GZVM_IRQ_LINE — the kernel will mask
+     * disabled interrupts.  Do NOT check QEMU's local GIC state
+     * here, because guest GIC register accesses go to the kernel
+     * VGIC directly and QEMU's state is stale.
      */
-    if (!gzvm_irq_is_enabled(s, cs, irqtype, irq)) {
-        return;
-    }
 
     irq_level.irq = (irqtype << GZVM_IRQ_TYPE_SHIFT) |
                     ((cpu & GZVM_IRQ_VCPU_MASK) << GZVM_IRQ_VCPU_SHIFT) |
@@ -93,27 +80,6 @@ static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
                     irq, level, strerror(errno));
     }
 }
-
-static const MemoryRegionOps gzvm_gic_ops[] = {
-    {
-        .read_with_attrs = gicv3_dist_read,
-        .write_with_attrs = gicv3_dist_write,
-        .endianness = DEVICE_NATIVE_ENDIAN,
-        .valid.min_access_size = 1,
-        .valid.max_access_size = 8,
-        .impl.min_access_size = 1,
-        .impl.max_access_size = 8,
-    },
-    {
-        .read_with_attrs = gicv3_redist_read,
-        .write_with_attrs = gicv3_redist_write,
-        .endianness = DEVICE_NATIVE_ENDIAN,
-        .valid.min_access_size = 1,
-        .valid.max_access_size = 8,
-        .impl.min_access_size = 1,
-        .impl.max_access_size = 8,
-    },
-};
 
 static void gzvm_arm_gicv3_realize(DeviceState *dev, Error **errp)
 {
@@ -133,7 +99,13 @@ static void gzvm_arm_gicv3_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    gicv3_init_irqs_and_mmio(s, gzvm_arm_gicv3_set_irq, gzvm_gic_ops);
+    /*
+     * Pass NULL ops so that DIST/REDIST MMIO regions are mapped as
+     * pass-through — guest accesses go directly to the kernel VGIC.
+     * The kernel intercepted GIC register writes already; having QEMU
+     * also trap them causes stale GIC state and breaks interrupt delivery.
+     */
+    gicv3_init_irqs_and_mmio(s, gzvm_arm_gicv3_set_irq, NULL);
 }
 
 static void gzvm_arm_gicv3_class_init(ObjectClass *klass, const void *data)
