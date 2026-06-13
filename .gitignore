@@ -44,7 +44,6 @@ ctags
 GPATH
 GRTAGS
 GTAGS
-opencode.jsonc
 pc-bios/*.bin
 pc-bios/*.dtb
 pc-bios/*.img
@@ -75,3 +74,8 @@ scripts/*/__pycache__/
 scripts/oss-fuzz/
 tests/data/uefi-boot-images/
 tests/lcitool/
+
+# Personal development tool configurations (do not sync)
+.b4-config
+.gitpublish
+opencode.jsonc
