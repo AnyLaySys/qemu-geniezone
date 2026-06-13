@@ -256,9 +256,22 @@ gzvm_add_mem_range(GZVMState *s, MemoryRegionSection *section,
                    uint64_t gpa, uint64_t size, uint32_t flags)
 {
     MemoryRegion *area = section->mr;
-    uint64_t offset = gpa - section->offset_within_address_space;
-    uint8_t *hva = memory_region_get_ram_ptr(area) +
-                   section->offset_within_region + offset;
+    uint64_t section_start = section->offset_within_address_space;
+    uint64_t section_end = section_start + int128_get64(section->size);
+    uint64_t offset;
+    uint8_t *hva;
+
+    /* Sanity check: ensure gpa is within the section bounds */
+    if (gpa < section_start || gpa + size > section_end) {
+        error_report("gzvm: memory range [0x%" PRIx64 ", 0x%" PRIx64 
+                     ") is out of section bounds [0x%" PRIx64 ", 0x%" PRIx64 ")",
+                     gpa, gpa + size, section_start, section_end);
+        return -EINVAL;
+    }
+
+    offset = gpa - section_start;
+    hva = memory_region_get_ram_ptr(area) +
+          section->offset_within_region + offset;
 
     return gzvm_add_mem_slot(s, hva, gpa, size, flags);
 }
@@ -342,6 +355,9 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
 
     gzvm_slots_lock(s);
     if (gzvm_remove_overlap_slots_locked(s, section_start, section_size)) {
+        error_report("gzvm: failed to remove overlapping memory slots for "
+                     "region [0x%" PRIx64 ", 0x%" PRIx64 ")",
+                     section_start, section_start + section_size);
         gzvm_slots_unlock(s);
         return;
     }
