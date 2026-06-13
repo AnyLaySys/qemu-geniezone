@@ -14,6 +14,15 @@
 #define gzvm_slots_lock(s)    qemu_mutex_lock(&(s)->slots_lock)
 #define gzvm_slots_unlock(s)  qemu_mutex_unlock(&(s)->slots_lock)
 
+static void gzvm_assert_mutex_locked(QemuMutex *m)
+{
+    int ret = pthread_mutex_trylock(&m->lock);
+    if (ret == 0) {
+        pthread_mutex_unlock(&m->lock);
+    }
+    assert(ret == EBUSY);
+}
+
 /*
  * Binary-search sorted_ids[] for the first slot whose start >= addr.
  * Returns nr_active_slots if none found.
@@ -107,19 +116,34 @@ static gzvm_slot *gzvm_get_free_slot(GZVMState *s)
     return NULL;
 }
 
-static void gzvm_remove_slot_from_sorted_ids(GZVMState *s, gzvm_slot *slot)
+static void gzvm_update_sorted_ids(GZVMState *s, int slot_id, bool add)
 {
     int pos;
 
-    for (pos = 0; pos < (int)s->nr_active_slots; pos++) {
-        if (s->sorted_ids[pos] == slot->id) {
-            break;
+    if (add) {
+        uint64_t gpa = s->slots[slot_id].start;
+        pos = 0;
+        while (pos < (int)s->nr_active_slots &&
+               s->slots[s->sorted_ids[pos]].start < gpa) {
+            pos++;
         }
-    }
-    if (pos < (int)s->nr_active_slots) {
-        memmove(&s->sorted_ids[pos], &s->sorted_ids[pos + 1],
-                (s->nr_active_slots - pos - 1) * sizeof(gint));
-        s->nr_active_slots--;
+        if (pos < (int)s->nr_active_slots) {
+            memmove(&s->sorted_ids[pos + 1], &s->sorted_ids[pos],
+                    (s->nr_active_slots - pos) * sizeof(gint));
+        }
+        s->sorted_ids[pos] = slot_id;
+        s->nr_active_slots++;
+    } else {
+        for (pos = 0; pos < (int)s->nr_active_slots; pos++) {
+            if (s->sorted_ids[pos] == slot_id) {
+                break;
+            }
+        }
+        if (pos < (int)s->nr_active_slots) {
+            memmove(&s->sorted_ids[pos], &s->sorted_ids[pos + 1],
+                    (s->nr_active_slots - pos - 1) * sizeof(gint));
+            s->nr_active_slots--;
+        }
     }
 }
 
@@ -134,21 +158,26 @@ gzvm_set_memory_region_locked(GZVMState *s, uint32_t slot, uint32_t flags,
         .memory_size = size,
         .userspace_addr = (__u64)(uintptr_t)hva,
     };
+    gzvm_assert_mutex_locked(&s->slots_lock);
     return gzvm_vm_ioctl(GZVM_SET_USER_MEMORY_REGION, &gumr);
 }
 
 static void gzvm_mem_slot_deactivate_locked(GZVMState *s, gzvm_slot *slot)
 {
-    gzvm_remove_slot_from_sorted_ids(s, slot);
+    gzvm_assert_mutex_locked(&s->slots_lock);
+    gzvm_update_sorted_ids(s, slot->id, false);
     slot->size = 0;
     slot->mem = NULL;
     slot->start = 0;
     slot->flags = 0;
+    gzvm_signal_update_regions(s);
 }
 
 static int gzvm_remove_mem_slot_locked(GZVMState *s, gzvm_slot *slot)
 {
     int ret;
+
+    gzvm_assert_mutex_locked(&s->slots_lock);
 
     ret = gzvm_set_memory_region_locked(s, slot->id, 0,
                                         slot->start, 0, slot->mem);
@@ -205,18 +234,8 @@ static int gzvm_add_mem_slot(GZVMState *s, uint8_t *hva, uint64_t gpa,
     slot->start = gpa;
     slot->flags = flags;
 
-    /* Insert slot->id into sorted_ids, maintaining address order */
-    int ins_pos = 0;
-    while (ins_pos < (int)s->nr_active_slots &&
-           s->slots[s->sorted_ids[ins_pos]].start < gpa) {
-        ins_pos++;
-    }
-    if (ins_pos < (int)s->nr_active_slots) {
-        memmove(&s->sorted_ids[ins_pos + 1], &s->sorted_ids[ins_pos],
-                (s->nr_active_slots - ins_pos) * sizeof(gint));
-    }
-    s->sorted_ids[ins_pos] = slot->id;
-    s->nr_active_slots++;
+    gzvm_update_sorted_ids(s, slot->id, true);
+    gzvm_signal_update_regions(s);
     return 0;
 }
 
@@ -242,6 +261,52 @@ gzvm_add_mem_range(GZVMState *s, MemoryRegionSection *section,
                    section->offset_within_region + offset;
 
     return gzvm_add_mem_slot(s, hva, gpa, size, flags);
+}
+
+/*
+ * Handle firmware region splitting for protected VMs.
+ * Returns: 0 if no FW overlap (caller continues with normal add),
+ *          1 if FW split was done (caller skips normal add),
+ *         -1 on error (caller skips normal add).
+ * Caller holds slots_lock.
+ */
+static int gzvm_set_phys_mem_fw_split(GZVMState *s,
+                                       MemoryRegionSection *section,
+                                       uint64_t section_start,
+                                       uint64_t section_size,
+                                       uint32_t flags)
+{
+    uint64_t page_size = qemu_real_host_page_size();
+    uint64_t section_end = section_start + section_size;
+    uint64_t fw_start = QEMU_ALIGN_DOWN(s->firmware_start, page_size);
+    uint64_t fw_end = QEMU_ALIGN_UP(s->firmware_start + s->firmware_size,
+                                    page_size);
+
+    if (!(fw_start < section_end && fw_end > section_start)) {
+        return 0;
+    }
+
+    uint64_t protect_start = MAX(fw_start, section_start);
+    uint64_t protect_end = MIN(fw_end, section_end);
+
+    if (protect_start > section_start) {
+        if (gzvm_add_mem_range(s, section, section_start,
+                               protect_start - section_start, flags)) {
+            return -1;
+        }
+    }
+    if (gzvm_add_mem_range(s, section, protect_start,
+                           protect_end - protect_start,
+                           GZVM_USER_MEM_REGION_PROTECT_FW)) {
+        return -1;
+    }
+    if (protect_end < section_end) {
+        if (gzvm_add_mem_range(s, section, protect_end,
+                               section_end - protect_end, flags)) {
+            return -1;
+        }
+    }
+    return 1;
 }
 
 static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool add)
@@ -271,6 +336,7 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
 
     if (section_start < s->ram_base &&
         !memory_region_is_rom(area) && !memory_region_is_romd(area)) {
+        trace_gzvm_skip_region(section_start, section_size, s->ram_base);
         return;
     }
 
@@ -286,35 +352,10 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
 
     if (s->protected_vm && s->firmware_size &&
         !area->readonly && !area->rom_device) {
-        uint64_t section_end = section_start + section_size;
-        uint64_t fw_start = QEMU_ALIGN_DOWN(s->firmware_start, page_size);
-        uint64_t fw_end = QEMU_ALIGN_UP(s->firmware_start + s->firmware_size,
-                                        page_size);
-
-        if (fw_start < section_end && fw_end > section_start) {
-            uint64_t protect_start = MAX(fw_start, section_start);
-            uint64_t protect_end = MIN(fw_end, section_end);
-
-            if (protect_start > section_start) {
-                if (gzvm_add_mem_range(s, section, section_start,
-                                       protect_start - section_start, flags)) {
-                    gzvm_slots_unlock(s);
-                    return;
-                }
-            }
-            if (gzvm_add_mem_range(s, section, protect_start,
-                                   protect_end - protect_start,
-                                   GZVM_USER_MEM_REGION_PROTECT_FW)) {
-                gzvm_slots_unlock(s);
-                return;
-            }
-            if (protect_end < section_end) {
-                if (gzvm_add_mem_range(s, section, protect_end,
-                                       section_end - protect_end, flags)) {
-                    gzvm_slots_unlock(s);
-                    return;
-                }
-            }
+        int fw_ret = gzvm_set_phys_mem_fw_split(s, section,
+                                                 section_start, section_size,
+                                                 flags);
+        if (fw_ret) {
             gzvm_slots_unlock(s);
             return;
         }
@@ -373,16 +414,9 @@ static int gzvm_create_vgic_device(GZVMState *s,
     return 0;
 }
 
-int gzvm_create_vm(void)
+static int gzvm_open_device(GZVMState *s)
 {
-    AccelState *accel = current_accel();
-    GZVMState *s;
     int ret;
-
-    if (!accel) {
-        return -1;
-    }
-    s = GZVM_STATE(accel);
 
     s->fd = qemu_open_old("/dev/gzvm", O_RDWR);
     if (s->fd == -1) {
@@ -399,7 +433,11 @@ int gzvm_create_vm(void)
     }
     s->vmfd = ret;
     trace_gzvm_create_vm(s->vmfd);
+    return 0;
+}
 
+static void gzvm_probe_caps(GZVMState *s)
+{
     {
         uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
         int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
@@ -429,6 +467,50 @@ int gzvm_create_vm(void)
             }
         }
     }
+}
+
+static int gzvm_create_vgic_devices(GZVMState *s)
+{
+    int ret;
+
+    ret = gzvm_create_vgic_device(s, GZVM_DEV_TYPE_ARM_VGIC_V3_DIST,
+                                  0x08000000ULL, 0x10000,
+                                  &s->gic_dist_base, "VGIC_DIST");
+    if (ret) {
+        close(s->vmfd);
+        close(s->fd);
+        return -1;
+    }
+    trace_gzvm_vgic_dist_created(s->gic_dist_base);
+
+    ret = gzvm_create_vgic_device(s, GZVM_DEV_TYPE_ARM_VGIC_V3_REDIST,
+                                  0x080A0000ULL, 0x20000ULL,
+                                  &s->gic_redist_base, "VGIC_REDIST");
+    if (ret) {
+        close(s->vmfd);
+        close(s->fd);
+        return -1;
+    }
+    trace_gzvm_vgic_redist_created(s->gic_redist_base);
+
+    return 0;
+}
+
+int gzvm_create_vm(void)
+{
+    AccelState *accel = current_accel();
+    GZVMState *s;
+
+    if (!accel) {
+        return -1;
+    }
+    s = GZVM_STATE(accel);
+
+    if (gzvm_open_device(s)) {
+        return -1;
+    }
+
+    gzvm_probe_caps(s);
 
     s->slots = g_new0(gzvm_slot, GZVM_MAX_MEM_SLOTS);
     s->sorted_ids = g_new0(gint, GZVM_MAX_MEM_SLOTS);
@@ -443,22 +525,5 @@ int gzvm_create_vm(void)
     memory_listener_register(&gzvm_memory_listener, &address_space_memory);
     memory_listener_register(&gzvm_ioeventfd_listener, &address_space_memory);
 
-    ret = gzvm_create_vgic_device(s, GZVM_DEV_TYPE_ARM_VGIC_V3_DIST,
-                                   0x08000000ULL, 0x10000,
-                                   &s->gic_dist_base, "VGIC_DIST");
-    if (ret) {
-        close(s->fd);
-        return -1;
-    }
-    trace_gzvm_vgic_dist_created(s->gic_dist_base);
-    ret = gzvm_create_vgic_device(s, GZVM_DEV_TYPE_ARM_VGIC_V3_REDIST,
-                                   0x080A0000ULL, 0x20000ULL,
-                                   &s->gic_redist_base, "VGIC_REDIST");
-    if (ret) {
-        close(s->fd);
-        return -1;
-    }
-    trace_gzvm_vgic_redist_created(s->gic_redist_base);
-
-    return 0;
+    return gzvm_create_vgic_devices(s);
 }

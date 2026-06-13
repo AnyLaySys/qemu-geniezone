@@ -32,6 +32,7 @@ int gzvm_start_vm(void)
             }
         }
 
+        /* Enable protected VM */
         struct gzvm_enable_cap cap = {
             .cap = GZVM_CAP_PROTECTED_VM,
             .args = { GZVM_CAP_PVM_SET_PROTECTED_VM, 0, 0, 0, 0 },

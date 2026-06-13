@@ -12,6 +12,7 @@
 /* gzvm-signal.c */
 void gzvm_install_sigsegv_handler(void);
 void gzvm_init_vcpu_sigsegv(void);
+void gzvm_signal_update_regions(GZVMState *s);
 /* gzvm-ioctl.c */
 int gzvm_dev_ioctl(GZVMState *s, int type, void *arg);
 void gzvm_ioctl_set_state(GZVMState *s);

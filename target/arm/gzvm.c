@@ -8,6 +8,7 @@
 #include "system/gzvm_int.h"
 #include "linux-headers/linux/gzvm.h"
 #include "cpu-sysregs.h"
+#include "trace/trace-accel_gzvm.h"
 
 #define GZVM_CORE_REG(offset)  (GZVM_REG_ARM64 | GZVM_REG_SIZE_U64 | \
                                 GZVM_REG_ARM_CORE | ((offset) / 4))
@@ -66,6 +67,7 @@ static int gzvm_set_one_reg(CPUState *cs, uint64_t id, void *source)
 
 int gzvm_arm_set_dtb(uint64_t dtb_start, uint64_t dtb_size)
 {
+    assert(gzvm_enabled());
     GZVMState *state = GZVM_STATE(current_accel());
     state->dtb_start = dtb_start;
     state->dtb_size = dtb_size;
@@ -74,6 +76,7 @@ int gzvm_arm_set_dtb(uint64_t dtb_start, uint64_t dtb_size)
 
 void gzvm_set_firmware(uint64_t start, uint64_t size)
 {
+    assert(gzvm_enabled());
     GZVMState *state = GZVM_STATE(current_accel());
     state->firmware_start = start;
     state->firmware_size = size;
@@ -82,6 +85,7 @@ void gzvm_set_firmware(uint64_t start, uint64_t size)
 void gzvm_set_gic_bases(uint64_t dist_base, uint64_t redist_base,
                         uint64_t redist_size)
 {
+    assert(gzvm_enabled());
     GZVMState *state = GZVM_STATE(current_accel());
     state->gic_dist_base = dist_base;
     state->gic_redist_base = redist_base;
@@ -107,6 +111,7 @@ void gzvm_set_gic_bases(uint64_t dist_base, uint64_t redist_base,
 
 void gzvm_set_ram_base(uint64_t base)
 {
+    assert(gzvm_enabled());
     GZVMState *state = GZVM_STATE(current_accel());
     state->ram_base = base;
 }
@@ -134,11 +139,17 @@ static int gzvm_get_one_reg_sw(CPUState *cs, uint64_t id, void *target)
 int gzvm_arch_get_registers(CPUState *cs, int level)
 {
     /*
-     * GZVM_GET_ONE_REG is not supported by the kernel driver
-     * (returns -EOPNOTSUPP).  Read from env as a best-effort
-     * fallback so 'info registers' and GDB show something
-     * rather than zeroes or crashing.
+     * STUB: The GZVM kernel driver does not support GZVM_GET_ONE_REG
+     * (returns -EOPNOTSUPP).  Until that UAPI is added, we cannot
+     * read live register state back from the hypervisor.
+     *
+     * As a best-effort fallback, gzvm_get_one_reg_sw() reads PSTATE,
+     * PC, and X0 from env — values that QEMU already set during
+     * gzvm_arch_put_registers().  This means 'info registers' and
+     * GDB will show stale data after the guest has run.  Callers
+     * should not rely on the returned values being accurate.
      */
+    trace_gzvm_get_registers_stub();
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
     uint64_t val;
@@ -290,6 +301,18 @@ static bool gzvm_read_sysreg_direct(int idx, uint64_t *value)
 {
     struct sigaction sa, old;
 
+    /*
+     * SA_NODEFER is intentional: this handler must be re-entrant for
+     * probing.  If SIGILL were masked during handler execution, a
+     * second SIGILL (from a nested probe) would deadlock.  With
+     * SA_NODEFER the nested SIGILL re-enters gzvm_sysreg_sigill and
+     * jumps back to the sigsetjmp in the outer call.
+     *
+     * The window between sigsetjmp saving the context and the
+     * sigaction installing the handler is the only time SIGILL could
+     * lead to a crash.  We keep this window narrow by calling
+     * sigaction directly before sigsetjmp.
+     */
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = gzvm_sysreg_sigill;
     sa.sa_flags = SA_NODEFER;
@@ -385,6 +408,80 @@ static bool gzvm_arm_read_host_cpu_features(ARMCPU *cpu)
     return true;
 }
 
+static void gzvm_override_ipa_size(ARMISARegisters *isar)
+{
+    /*
+     * Kernel sanitizes ID_AA64MMFR0_EL1.PARANGE for EL0 MRS accesses
+     * (returns 0 = 32-bit).  Query GZVM's actual IPA capability and
+     * override PARANGE so arm_pamax() returns the correct value.
+     */
+    uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
+    int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
+    unsigned int gzvm_parange;
+    if (r == 0 && cap > 0) {
+        gzvm_parange = round_down_to_parange_index(cap);
+    } else {
+        /*
+         * Old kernel driver does not support GZVM_CAP_ARM_VM_IPA_SIZE.
+         * The kernel sanitises ID_AA64MMFR0_EL1.PARANGE to 0 (32-bit)
+         * on MRS access, which would limit the guest to 4 GB.  Default
+         * to 40-bit IPA to support guests with up to 1 TB of RAM.
+         */
+        gzvm_parange = 2; /* 40-bit */
+    }
+    {
+        unsigned int cur_parange =
+            FIELD_EX64_IDREG(isar, ID_AA64MMFR0, PARANGE);
+        if (gzvm_parange > cur_parange) {
+            uint64_t mmfr0 = GET_IDREG(isar, ID_AA64MMFR0);
+            mmfr0 = FIELD_DP64(mmfr0, ID_AA64MMFR0, PARANGE, gzvm_parange);
+            SET_IDREG(isar, ID_AA64MMFR0, mmfr0);
+        }
+    }
+}
+
+static void gzvm_mask_sve_sme(ARMISARegisters *isar)
+{
+    /*
+     * GZVM kernel driver has no SVE/SME register type (no
+     * GZVM_REG_ARM64_SVE in the UAPI), so we cannot save/restore
+     * SVE/SME state.  Mask these features out of the ID registers
+     * until kernel support arrives.
+     */
+    uint64_t pfr0 = GET_IDREG(isar, ID_AA64PFR0);
+    pfr0 = FIELD_DP64(pfr0, ID_AA64PFR0, SVE, 0);
+    SET_IDREG(isar, ID_AA64PFR0, pfr0);
+
+    uint64_t pfr1 = GET_IDREG(isar, ID_AA64PFR1);
+    pfr1 = FIELD_DP64(pfr1, ID_AA64PFR1, SME, 0);
+    SET_IDREG(isar, ID_AA64PFR1, pfr1);
+
+    SET_IDREG(isar, ID_AA64SMFR0, 0);
+}
+
+static void gzvm_mask_pmu(ARMISARegisters *isar, CPUARMState *env,
+                           ARMCPU *cpu)
+{
+    /*
+     * GZVM kernel has no PMU interrupt routing UAPI (no
+     * equivalent of KVM_ARM_VCPU_PMU_V3_CTRL), so PMU overflow
+     * interrupts cannot reach the guest.  Mask PMU out until
+     * kernel support arrives.
+     */
+    uint64_t dfr0 = GET_IDREG(isar, ID_AA64DFR0);
+    dfr0 = FIELD_DP64(dfr0, ID_AA64DFR0, PMUVER, 0);
+    SET_IDREG(isar, ID_AA64DFR0, dfr0);
+
+    /*
+     * PMUVER masked in ID_AA64DFR0 above; now clear the feature bit
+     * to prevent the guest from using the PMU.  env->features was
+     * set from the original ID registers before masking, so the
+     * ARM_FEATURE_PMU bit may still be set at this point.
+     */
+    env->features &= ~BIT(ARM_FEATURE_PMU);
+    cpu->has_pmu = false;
+}
+
 void gzvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
 {
     ARMISARegisters *isar = &cpu->isar;
@@ -399,68 +496,9 @@ void gzvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
     cpu->reset_sctlr = 0x00c50078;
     cpu->dtb_compatible = "arm,armv8";
 
-    /*
-     * Kernel sanitizes ID_AA64MMFR0_EL1.PARANGE for EL0 MRS accesses
-     * (returns 0 = 32-bit).  Query GZVM's actual IPA capability and
-     * override PARANGE so arm_pamax() returns the correct value.
-     */
-    {
-        uint64_t cap = GZVM_CAP_ARM_VM_IPA_SIZE;
-        int r = gzvm_vm_ioctl(GZVM_CHECK_EXTENSION, &cap);
-        unsigned int gzvm_parange;
-        if (r == 0 && cap > 0) {
-            gzvm_parange = round_down_to_parange_index(cap);
-        } else {
-            /*
-             * Old kernel driver does not support GZVM_CAP_ARM_VM_IPA_SIZE.
-             * The kernel sanitises ID_AA64MMFR0_EL1.PARANGE to 0 (32-bit)
-             * on MRS access, which would limit the guest to 4 GB.  Default
-             * to 40-bit IPA to support guests with up to 1 TB of RAM.
-             */
-            gzvm_parange = 2; /* 40-bit */
-        }
-        {
-            unsigned int cur_parange =
-                FIELD_EX64_IDREG(isar, ID_AA64MMFR0, PARANGE);
-            if (gzvm_parange > cur_parange) {
-                uint64_t mmfr0 = GET_IDREG(isar, ID_AA64MMFR0);
-                mmfr0 = FIELD_DP64(mmfr0, ID_AA64MMFR0, PARANGE, gzvm_parange);
-                SET_IDREG(isar, ID_AA64MMFR0, mmfr0);
-            }
-        }
-    }
-
-    /*
-     * GZVM kernel driver has no SVE/SME register type (no
-     * GZVM_REG_ARM64_SVE in the UAPI), so we cannot save/restore
-     * SVE/SME state.  Mask these features out of the ID registers
-     * until kernel support arrives.
-     */
-    {
-        uint64_t pfr0 = GET_IDREG(isar, ID_AA64PFR0);
-        pfr0 = FIELD_DP64(pfr0, ID_AA64PFR0, SVE, 0);
-        SET_IDREG(isar, ID_AA64PFR0, pfr0);
-    }
-    {
-        uint64_t pfr1 = GET_IDREG(isar, ID_AA64PFR1);
-        pfr1 = FIELD_DP64(pfr1, ID_AA64PFR1, SME, 0);
-        SET_IDREG(isar, ID_AA64PFR1, pfr1);
-    }
-    SET_IDREG(isar, ID_AA64SMFR0, 0);
-
-    /*
-     * GZVM kernel has no PMU interrupt routing UAPI (no
-     * equivalent of KVM_ARM_VCPU_PMU_V3_CTRL), so PMU overflow
-     * interrupts cannot reach the guest.  Mask PMU out until
-     * kernel support arrives.
-     */
-    {
-        uint64_t dfr0 = GET_IDREG(isar, ID_AA64DFR0);
-        dfr0 = FIELD_DP64(dfr0, ID_AA64DFR0, PMUVER, 0);
-        SET_IDREG(isar, ID_AA64DFR0, dfr0);
-    }
-    env->features &= ~BIT(ARM_FEATURE_PMU);
-    cpu->has_pmu = false;
+    gzvm_override_ipa_size(isar);
+    gzvm_mask_sve_sme(isar);
+    gzvm_mask_pmu(isar, env, cpu);
 }
 
 void arm_cpu_gzvm_set_irq(void *arm_cpu, int irq, int level)
@@ -469,7 +507,7 @@ void arm_cpu_gzvm_set_irq(void *arm_cpu, int irq, int level)
     CPUARMState *env = &cpu->env;
     struct gzvm_irq_level irq_level;
     uint32_t linestate_bit;
-    int irq_id;
+    int irq_id = 0;
 
     if (!arm_feature(env, ARM_FEATURE_EL2) &&
         (irq == ARM_CPU_VIRQ || irq == ARM_CPU_VFIQ)) {

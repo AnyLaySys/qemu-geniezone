@@ -1956,7 +1956,7 @@ static bool virt_firmware_init(VirtMachineState *vms,
             image_size = load_image_targphys_as(fname, fw_addr,
                                                 MIN(ms->ram_size, 4 * MiB),
                                                 &address_space_memory, NULL);
-            if (image_size >= 0) {
+            if (image_size > 0) {
                 gzvm_set_firmware(fw_addr, image_size);
             }
         } else {
@@ -2973,7 +2973,10 @@ static void machvirt_init(MachineState *machine)
         vms->psci_conduit = QEMU_PSCI_CONDUIT_DISABLED;
     } else if (vms->virt) {
         if (gzvm_enabled()) {
-            /* GenieZone hypervisor only supports HVC conduit */
+            /*
+             * GZVM only supports HVC conduit. If future versions add
+             * SMC support, check GZVM_CAP_ARM_SMC_CONDUIT here.
+             */
             vms->psci_conduit = QEMU_PSCI_CONDUIT_HVC;
         } else {
             vms->psci_conduit = QEMU_PSCI_CONDUIT_SMC;
@@ -3227,9 +3230,13 @@ static void machvirt_init(MachineState *machine)
     }
 
     vms->highmem_ecam &= (!firmware_loaded || aarch64);
-    virt_gzvm_disable_highmem(vms);
 
     if (gzvm_enabled() && vms->ras) {
+        /*
+         * RAS is not yet supported on GZVM (no MCE error injection path).
+         * Consider upgrading this to exit(1) once confirmed that no guest
+         * relies on booting with ras=on under GZVM.
+         */
         warn_report("GZVM: RAS not supported (no MCE error injection path; "
                      "guest will not receive hardware error notifications)");
     }

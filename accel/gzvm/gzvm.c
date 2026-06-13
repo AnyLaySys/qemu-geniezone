@@ -119,11 +119,8 @@ void gzvm_cpu_synchronize_post_reset(CPUState *cpu)
     run_on_cpu(cpu, do_gzvm_cpu_synchronize_post_reset, RUN_ON_CPU_NULL);
 }
 
-void *gzvm_cpu_thread_fn(void *arg)
+static bool gzvm_cpu_thread_init(CPUState *cpu)
 {
-    CPUState *cpu = arg;
-    int ret;
-
     rcu_register_thread();
 
     bql_lock();
@@ -134,16 +131,39 @@ void *gzvm_cpu_thread_fn(void *arg)
     gzvm_init_cpu_signals();
     gzvm_init_vcpu_sigsegv();
 
-    ret = gzvm_init_vcpu(cpu);
-    if (ret) {
+    if (gzvm_init_vcpu(cpu)) {
         cpu_thread_signal_destroyed(cpu);
         bql_unlock();
         rcu_unregister_thread();
-        return NULL;
+        return false;
     }
 
     cpu_thread_signal_created(cpu);
     qemu_guest_random_seed_thread_part2(cpu->random_seed);
+    return true;
+}
+
+static void gzvm_cpu_thread_cleanup(CPUState *cpu)
+{
+    struct GZVCPUState *vcpu = GZVCPU(cpu);
+
+    close(vcpu->fd);
+    qatomic_set(&cpu->accel, NULL);
+    g_free(vcpu->run);
+    g_free(vcpu);
+    cpu_thread_signal_destroyed(cpu);
+    bql_unlock();
+    rcu_unregister_thread();
+}
+
+void *gzvm_cpu_thread_fn(void *arg)
+{
+    CPUState *cpu = arg;
+    int ret;
+
+    if (!gzvm_cpu_thread_init(cpu)) {
+        return NULL;
+    }
 
     do {
         qemu_process_cpu_events(cpu);
@@ -159,12 +179,6 @@ void *gzvm_cpu_thread_fn(void *arg)
         }
     } while (!cpu->unplug || cpu_can_run(cpu));
 
-    close(GZVCPU(cpu)->fd);
-    g_free(GZVCPU(cpu)->run);
-    g_free(cpu->accel);
-    qatomic_set(&cpu->accel, NULL);
-    cpu_thread_signal_destroyed(cpu);
-    bql_unlock();
-    rcu_unregister_thread();
+    gzvm_cpu_thread_cleanup(cpu);
     return NULL;
 }

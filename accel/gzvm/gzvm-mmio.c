@@ -35,6 +35,13 @@ static gzvm_slot *gzvm_find_slot_for_mmio(hwaddr addr, hwaddr *slot_addr_out)
         return slot;
     }
 
+    /*
+     * GZVM_IPA_WORKAROUND (compile-time): some firmware/platforms
+     * generate MMIO exits with an IPA having bit-30 cleared and
+     * bit-26 set instead of the expected address.  Remap those
+     * patterns to the correct IPA when a matching slot exists.
+     * Remove once the platform firmware is fixed.
+     */
 #if defined(GZVM_IPA_WORKAROUND)
     if ((addr >> 28) == 0x4) {
         hwaddr corrected = (addr & 0x0FFFFFFF) | 0x04000000;
@@ -54,19 +61,19 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
     hwaddr addr = run->mmio.phys_addr;
     MemTxResult r;
 
-    r = address_space_rw(&address_space_memory, addr,
-                         gzvm_mmio_attrs(addr),
-                         run->mmio.data, run->mmio.size, run->mmio.is_write);
-    if (r == MEMTX_OK) {
-        return 0;
-    }
-
     if (run->mmio.size > 8) {
         warn_report("gzvm: large MMIO %s at 0x%" PRIx64 " size=%" PRIu64
                      " (max 8 bytes supported, treated as RAZ/WI)",
                      run->mmio.is_write ? "write" : "read",
                      (uint64_t)run->mmio.phys_addr,
                      (uint64_t)run->mmio.size);
+        return 0;
+    }
+
+    r = address_space_rw(&address_space_memory, addr,
+                         gzvm_mmio_attrs(addr),
+                         run->mmio.data, run->mmio.size, run->mmio.is_write);
+    if (r == MEMTX_OK) {
         return 0;
     }
 
@@ -78,6 +85,8 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
             if (offset < slot->size) {
                 size_t xlen = MIN((uint64_t)run->mmio.size,
                                   slot->size - offset);
+                trace_gzvm_mmio_fallback(addr, run->mmio.size,
+                                         run->mmio.is_write);
                 if (run->mmio.is_write) {
                     memcpy(slot->mem + offset, run->mmio.data, xlen);
                 } else {

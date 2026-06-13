@@ -172,6 +172,10 @@ gicv3_cpuif_virt_update(uint32_t cpuid, int idx, int hppvlpi, int grp, int prio)
 gicv3_cpuif_virt_set_irqs(uint32_t cpuid, int fiqlevel, int irqlevel) "GICv3 CPU i/f 0x%x virt HPPI update: setting FIQ %d IRQ %d"
 gicv3_cpuif_virt_set_maint_irq(uint32_t cpuid, int maintlevel) "GICv3 CPU i/f 0x%x virt HPPI update: setting maintenance-irq %d"
 
+# arm_gicv3_gzvm.c
+gzvm_gicv3_dist_read(uint64_t offset, unsigned size) "GZVM dist read (bypass): offset 0x%"PRIx64" size %u"
+gzvm_gicv3_dist_write(uint64_t offset, uint64_t data, unsigned size) "GZVM dist write (bypass): offset 0x%"PRIx64" data 0x%"PRIx64" size %u"
+
 # arm_gicv3_dist.c
 gicv3_dist_read(uint64_t offset, uint64_t data, unsigned size, bool secure) "GICv3 distributor read: offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u secure %d"
 gicv3_dist_badread(uint64_t offset, unsigned size, bool secure) "GICv3 distributor read: offset 0x%" PRIx64 " size %u secure %d: error"

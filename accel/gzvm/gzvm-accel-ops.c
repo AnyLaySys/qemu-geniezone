@@ -20,8 +20,9 @@ static int gzvm_init(AccelState *as, MachineState *ms)
 {
     int ret;
     Error *local_err = NULL;
+    GZVMState *s = GZVM_STATE(as);
 
-    gzvm_ioctl_set_state(GZVM_STATE(as));
+    gzvm_ioctl_set_state(s);
 
     ret = gzvm_create_vm();
     if (ret) {
@@ -35,6 +36,12 @@ static int gzvm_init(AccelState *as, MachineState *ms)
         error_report_err(local_err);
         error_free(gzvm_migration_blocker);
         gzvm_migration_blocker = NULL;
+        if (s->fd >= 0) {
+            close(s->fd);
+        }
+        if (s->vmfd >= 0) {
+            close(s->vmfd);
+        }
         return ret;
     }
 
@@ -59,6 +66,12 @@ static void gzvm_accel_instance_finalize(Object *obj)
     if (gzvm_migration_blocker) {
         migrate_del_blocker(&gzvm_migration_blocker);
     }
+    if (s->fd >= 0) {
+        close(s->fd);
+    }
+    if (s->vmfd >= 0) {
+        close(s->vmfd);
+    }
     g_free(s->slots);
     g_free(s->sorted_ids);
 }
@@ -78,7 +91,10 @@ static void gzvm_accel_instance_init(Object *obj)
 
 static void gzvm_setup_post(AccelState *accel)
 {
-    gzvm_start_vm();
+    int r = gzvm_start_vm();
+    if (r < 0) {
+        warn_report("gzvm: VM start failed");
+    }
 }
 
 static void gzvm_accel_class_init(ObjectClass *oc, const void *data)

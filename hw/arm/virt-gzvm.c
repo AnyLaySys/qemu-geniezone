@@ -5,6 +5,7 @@
 #include "hw/core/loader.h"
 #include "hw/nvram/fw_cfg.h"
 #include "hw/pci/pci.h"
+#include "qemu/error-report.h"
 #include "system/gzvm.h"
 #include "system/system.h"
 
@@ -42,20 +43,9 @@ void virt_gzvm_post_dtb(VirtMachineState *vms, hwaddr dtb_start, int dtb_size,
     if (dtb_data) {
         fw_cfg_add_file(vms->fw_cfg, "etc/fdt",
                         g_memdup2(dtb_data, dtb_size), dtb_size);
+    } else {
+        warn_report("GZVM: cannot find DTB in ROM -- fw_cfg 'etc/fdt' not added");
     }
-}
-
-void virt_gzvm_disable_highmem(VirtMachineState *vms)
-{
-    if (!gzvm_enabled()) {
-        return;
-    }
-
-    /*
-     * GZVM supports highmem PCI ECAM and MMIO — the guest accesses
-     * these via MMIO traps handled by QEMU.  No kernel-side memory
-     * slot registration is needed.  Let the user's choice stand.
-     */
 }
 
 void virt_gzvm_create_virtio_gpu(VirtMachineState *vms)
@@ -75,5 +65,9 @@ void virt_gzvm_set_bootinfo(VirtMachineState *vms, bool firmware_loaded)
     }
 
     vms->bootinfo.entry = vms->memmap[VIRT_MEM].base;
+    /*
+     * DTB must live above the firmware/BLOS region (0–4 MiB on virt).
+     * 4 MiB is the first safe offset after the typical firmware flash.
+     */
     vms->bootinfo.dtb_start = vms->memmap[VIRT_MEM].base + 4 * MiB;
 }

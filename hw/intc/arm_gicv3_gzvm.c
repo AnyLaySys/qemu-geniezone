@@ -10,6 +10,7 @@
 #include "system/runstate.h"
 #include "gicv3_internal.h"
 #include "migration/blocker.h"
+#include "trace.h"
 #include "qom/object.h"
 #include "target/arm/cpregs.h"
 #include "qemu/event_notifier.h"
@@ -34,6 +35,26 @@ static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
     int irqtype;
     int cpu;
 
+    /*
+     * QEMU GICv3 GPIO array layout (from gicv3_init_irqs_and_mmio):
+     *   [0..N-1]              SPIs  (N = num_irq - GIC_INTERNAL)
+     *   [N..N+31]             PPIs for CPU 0
+     *   [N+32..N+63]          PPIs for CPU 1
+     *   ...
+     *
+     * GIC interrupt numbering in ARM GICv3:
+     *   SGIs  = 0..15   (private, not routed here)
+     *   PPIs  = 16..31  (private per-CPU)
+     *   SPIs  = 32..287 (shared, extended to 1019 in GICv3)
+     *
+     * For SPI GPIO lines (irq < N): convert the GPIO index to the
+     * actual GIC SPI number by adding GIC_INTERNAL (32).
+     *
+     * For PPI GPIO lines (irq >= N): decode the CPU index and
+     * the per-CPU PPI number (0..31).  The kernel GZVM_IRQ_TYPE_PPI
+     * interface handles SGIs (0..15) as part of the PPI range;
+     * only PPIs (16..31) are actually wired as GPIO inputs.
+     */
     if (irq < (int)(s->num_irq - GIC_INTERNAL)) {
         irqtype = GZVM_IRQ_TYPE_SPI;
         cpu = 0;
@@ -81,17 +102,73 @@ static void gzvm_arm_gicv3_set_irq(void *opaque, int irq, int level)
     }
 }
 
+/*
+ * Distributor MMIO ops — never called because the kernel VGIC traps
+ * all distributor accesses via stage-2 page tables.
+ */
+static MemTxResult gzvm_gicv3_dist_read(void *opaque, hwaddr offset,
+                                         uint64_t *data, unsigned size,
+                                         MemTxAttrs attrs)
+{
+    trace_gzvm_gicv3_dist_read(offset, size);
+    *data = 0;
+    return MEMTX_OK;
+}
+
+static MemTxResult gzvm_gicv3_dist_write(void *opaque, hwaddr offset,
+                                          uint64_t data, unsigned size,
+                                          MemTxAttrs attrs)
+{
+    trace_gzvm_gicv3_dist_write(offset, data, size);
+    return MEMTX_OK;
+}
+
+static const MemoryRegionOps gzvm_gicv3_dist_ops = {
+    .read_with_attrs = gzvm_gicv3_dist_read,
+    .write_with_attrs = gzvm_gicv3_dist_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+    .valid = {
+        .min_access_size = 1,
+        .max_access_size = 8,
+    },
+};
+
+/*
+ * GZVM kernel VGIC traps the redistributor RD_PAGE (GICR_CTLR, GICR_WAKER,
+ * GICR_TYPER at offset 0x0000–0xFFFF) but NOT the SGI_PAGE (ISENABLER0,
+ * ICENABLER0, IPRIORITYR etc. at offset 0x10000–0x1FFFF).  Accesses to
+ * the SGI_PAGE leak to QEMU as MMIO exits.
+ *
+ * Use the standard GICv3 redistributor read/write handlers so that
+ * SGI/PPI register accesses are correctly emulated.  RD_PAGE accesses
+ * are still trapped by the kernel and never reach QEMU.
+ *
+ * gicv3_cpuif_update() called from gicr_writel is harmless: QEMU's
+ * gicd_ctlr stays at reset (no EN_GRP bits set), so gicr_int_pending()
+ * always returns 0 and no interrupt is asserted through QEMU's GIC model.
+ * All interrupt injection remains under kernel VGIC control via
+ * GZVM_IRQ_LINE.
+ */
+static const MemoryRegionOps gzvm_gicv3_redist_ops = {
+    .read_with_attrs = gicv3_redist_read,
+    .write_with_attrs = gicv3_redist_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+    .valid = {
+        .min_access_size = 1,
+        .max_access_size = 8,
+    },
+};
+
+static const MemoryRegionOps gzvm_gicv3_ops[2] = {
+    [0] = gzvm_gicv3_dist_ops,
+    [1] = gzvm_gicv3_redist_ops,
+};
+
 static void gzvm_arm_gicv3_realize(DeviceState *dev, Error **errp)
 {
     GICv3State *s = GZVM_ARM_GICV3(dev);
     GZVMARMGICv3Class *ggc = GZVM_ARM_GICV3_GET_CLASS(s);
     Error *local_err = NULL;
-
-    ggc->parent_realize(dev, &local_err);
-    if (local_err) {
-        error_propagate(errp, local_err);
-        return;
-    }
 
     if (s->revision != 3) {
         error_setg(errp, "unsupported GIC revision %d",
@@ -99,13 +176,13 @@ static void gzvm_arm_gicv3_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    /*
-     * Pass NULL ops so that DIST/REDIST MMIO regions are mapped as
-     * pass-through — guest accesses go directly to the kernel VGIC.
-     * The kernel intercepted GIC register writes already; having QEMU
-     * also trap them causes stale GIC state and breaks interrupt delivery.
-     */
-    gicv3_init_irqs_and_mmio(s, gzvm_arm_gicv3_set_irq, NULL);
+    ggc->parent_realize(dev, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
+
+    gicv3_init_irqs_and_mmio(s, gzvm_arm_gicv3_set_irq, gzvm_gicv3_ops);
 }
 
 static void gzvm_arm_gicv3_class_init(ObjectClass *klass, const void *data)
