@@ -33,6 +33,7 @@ void virt_gzvm_post_dtb(VirtMachineState *vms, hwaddr dtb_start, int dtb_size,
                         AddressSpace *as)
 {
     void *dtb_data;
+    void *dtb_copy;
 
     if (!gzvm_enabled()) {
         return;
@@ -41,8 +42,12 @@ void virt_gzvm_post_dtb(VirtMachineState *vms, hwaddr dtb_start, int dtb_size,
     gzvm_arm_set_dtb(dtb_start, dtb_size);
     dtb_data = rom_ptr_for_as(as, dtb_start, dtb_size);
     if (dtb_data) {
-        fw_cfg_add_file(vms->fw_cfg, "etc/fdt",
-                        g_memdup2(dtb_data, dtb_size), dtb_size);
+        dtb_copy = g_try_memdup2(dtb_data, dtb_size);
+        if (!dtb_copy) {
+            error_report("GZVM: failed to allocate memory for DTB copy");
+            return;
+        }
+        fw_cfg_add_file(vms->fw_cfg, "etc/fdt", dtb_copy, dtb_size);
     } else {
         warn_report("GZVM: cannot find DTB in ROM -- fw_cfg 'etc/fdt' not added");
     }
