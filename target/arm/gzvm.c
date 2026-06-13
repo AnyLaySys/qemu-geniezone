@@ -308,15 +308,18 @@ static bool gzvm_read_sysreg_direct(int idx, uint64_t *value)
      * SA_NODEFER the nested SIGILL re-enters gzvm_sysreg_sigill and
      * jumps back to the sigsetjmp in the outer call.
      *
-     * The window between sigsetjmp saving the context and the
-     * sigaction installing the handler is the only time SIGILL could
-     * lead to a crash.  We keep this window narrow by calling
-     * sigaction directly before sigsetjmp.
+     * To minimize the race window between handler setup and sigsetjmp:
+     * 1. Install handler BEFORE sigsetjmp (below) to catch early SIGILLs
+     * 2. Use sigaction return value to detect errors
+     * 3. A SIGILL in the remaining narrow window is acceptable as it
+     *    indicates an unrecoverable system state (HW fault during boot)
      */
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = gzvm_sysreg_sigill;
     sa.sa_flags = SA_NODEFER;
-    sigaction(SIGILL, &sa, &old);
+    if (sigaction(SIGILL, &sa, &old) < 0) {
+        return false;
+    }
 
     if (sigsetjmp(gzvm_sysreg_jmp, 1) == 0) {
         switch (idx) {
