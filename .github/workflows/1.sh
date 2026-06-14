@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 sudo apt install -y python3 python3-venv python3-pip cmake ninja-build meson pkg-config git curl
 NdkPath="$HOME/android-ndk-r30-beta1"
 ApiLevel="36"
@@ -14,8 +15,7 @@ GlibVer="2.83.0"
 PixmanVer="0.42.2"
 LibusbVer="1.0.27"
 BuildPixman="1"
-EpoxyGitUrl="https://github.com/anholt/libepoxy.git"
-VirGLGitUrl="https://gitlab.freedesktop.org/virgl/virglrenderer.git"
+# virglrenderer and libepoxy not needed (--disable-opengl --disable-virglrenderer)
 HostOS=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$HostOS" in
   linux)   HostTag="linux-x86_64" ;;
@@ -159,116 +159,4 @@ echo "配置 libusb ${LibusbVer}"
 echo "编译 libusb"
 make -j"$NCpu"
 make install
-EpoxySrc="$SrcDir/libepoxy"
-if [ ! -d "$EpoxySrc" ]; then
-  echo "克隆 libepoxy"
-  git clone --depth 1 "$EpoxyGitUrl" "$EpoxySrc"
-fi
-MesonCrossEpoxy="$OutDir/epoxy.cross"
-cat > "$MesonCrossEpoxy" <<EOF
-[binaries]
-c = '${CC}'
-cpp = '${CXX}'
-ar = '${AR}'
-strip = '${STRIP}'
-pkg-config = 'pkg-config'
-[built-in options]
-c_args = ['-fPIC','-fPIE','-ftls-model=global-dynamic']
-c_link_args = ['-pie']
-[host_machine]
-system = 'linux'
-cpu_family = '${MesonCpu}'
-cpu = '${MesonCpu}'
-endian = 'little'
-EOF
-mkdir -p "$OutDir/epoxy"
-cd "$OutDir/epoxy"
-[ -f build.ninja ] && rm -rf *
-echo "配置 libepoxy"
-meson setup . "$EpoxySrc" \
-  --cross-file "$MesonCrossEpoxy" \
-  --prefix "$Prefix" \
-  -Ddefault_library=shared \
-  -Degl=yes \
-  -Dglx=no \
-  -Dx11=false \
-  -Dtests=false
-echo "编译 libepoxy"
-meson compile -j"$NCpu"
-meson install
-VirGLSrc="$SrcDir/virglrenderer"
-if [ ! -d "$VirGLSrc" ]; then
-  echo "克隆 virglrenderer"
-  git clone --depth 1 "$VirGLGitUrl" "$VirGLSrc"
-fi
-VirGLPatch="$(cd "$(dirname "$0")" && pwd)/patch/virglrenderer_android.patch"
-if [ -f "$VirGLPatch" ]; then
-  echo "应用 VirGLRenderer Android 补丁"
-  if git -C "$VirGLSrc" apply --check "$VirGLPatch" 2>/dev/null; then
-    git -C "$VirGLSrc" apply "$VirGLPatch"
-    echo "VirGLRenderer Android 补丁应用成功"
-  else
-    echo "VirGLRenderer Android 补丁已存在或不需要，跳过"
-  fi
-fi
-CompatDir="$Prefix/include/compat"
-mkdir -p "$CompatDir/log" "$CompatDir/cutils"
-echo "为 VirGLRenderer 创建 Android NDK 兼容头文件"
-cat > "$CompatDir/log/log.h" <<'SHIM_LOG'
-#ifndef _COMPAT_LOG_LOG_H
-#define _COMPAT_LOG_LOG_H
-#include <android/log.h>
-#ifndef LOG_PRI
-#define LOG_PRI(priority, tag, ...) \
-    __android_log_print(priority, tag, __VA_ARGS__)
-#endif
-#endif
-SHIM_LOG
-cat > "$CompatDir/cutils/properties.h" <<'SHIM_PROP'
-#ifndef _COMPAT_CUTILS_PROPERTIES_H
-#define _COMPAT_CUTILS_PROPERTIES_H
-#include <string.h>
-#ifndef PROPERTY_VALUE_MAX
-#define PROPERTY_VALUE_MAX 92
-#endif
-#ifndef PROPERTY_KEY_MAX
-#define PROPERTY_KEY_MAX 32
-#endif
-static inline int property_get(const char *key, char *value,
-                               const char *default_value) {
-    (void)key;
-    if (default_value) {
-        strncpy(value, default_value, PROPERTY_VALUE_MAX - 1);
-        value[PROPERTY_VALUE_MAX - 1] = '\0';
-        return (int)strlen(value);
-    }
-    value[0] = '\0';
-    return 0;
-}
-#endif
-SHIM_PROP
-MesonCrossVirGL="$OutDir/virgl.cross"
-cat > "$MesonCrossVirGL" <<EOF
-[binaries]
-c = '${CC}'
-cpp = '${CXX}'
-ar = '${AR}'
-strip = '${STRIP}'
-pkg-config = 'pkg-config'
-[built-in options]
-c_args = ['-fPIC','-fPIE','-ftls-model=global-dynamic','-I${CompatDir}']
-c_link_args = ['-pie','-llog']
-[host_machine]
-system = 'linux'
-cpu_family = '${MesonCpu}'
-cpu = '${MesonCpu}'
-endian = 'little'
-EOF
-mkdir -p "$OutDir/virglrenderer"
-cd "$OutDir/virglrenderer"
-[ -f build.ninja ] && rm -rf *
-echo "配置 VirGLRenderer"
-meson setup . "$VirGLSrc" --cross-file "$MesonCrossVirGL" --prefix "$Prefix" -Ddefault_library=shared -Dtests=false
-echo "编译 VirGLRenderer"
-meson compile -j"$NCpu"
-meson install
+# libepoxy and virglrenderer skipped (--disable-opengl --disable-virglrenderer)
