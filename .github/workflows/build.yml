@@ -1,4 +1,4 @@
-name: QEMU GenieZone 构建
+name: QEMU GZVM Android 构建
 on:
   push:
     branches: [ "main" ]
@@ -13,6 +13,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
     - name: 部署
       run: |
         sudo apt update
@@ -20,23 +23,12 @@ jobs:
         sudo pip3 install --upgrade meson
         wget https://dl.google.com/android/repository/android-ndk-r30-beta1-linux.zip -O ndk.zip
         unzip -q ndk.zip -d $HOME
-        wget https://raw.githubusercontent.com/AnyLaySys/qemu-gunyah-build/main/1.sh
-        chmod +x ./1.sh
-        ./1.sh
-    - name: 拉取
-      run: |
-        git clone --recurse-submodules https://github.com/AnyLaySys/qemu-geniezone.git build/src/qemu-geniezone-main
-        mkdir -p build/src/qemu-geniezone-main/pyvenv
-        wget https://raw.githubusercontent.com/qemu/qemu/master/pyvenv/meson.build -O build/src/qemu-geniezone-main/pyvenv/meson.build
-        mkdir -p build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-softfloat-3 build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-testfloat-3
-        wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-softfloat-3/meson.build -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-softfloat-3/meson.build
-        wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-softfloat-3/meson_options.txt -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-softfloat-3/meson_options.txt
-        wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-testfloat-3/meson.build -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-testfloat-3/meson.build
-        wget https://raw.githubusercontent.com/qemu/qemu/master/subprojects/packagefiles/berkeley-testfloat-3/meson_options.txt -O build/src/qemu-geniezone-main/subprojects/packagefiles/berkeley-testfloat-3/meson_options.txt
+        chmod +x .github/workflows/1.sh
+        .github/workflows/1.sh
     - name: 编译
       run: |
         set -e
-        srcDir="$GITHUB_WORKSPACE/build/src/qemu-geniezone-main"
+        srcDir="$GITHUB_WORKSPACE"
         sysrootDir="$GITHUB_WORKSPACE/build/sysroot"
         toolchain="$HOME/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
         cd "$srcDir"
@@ -47,7 +39,7 @@ jobs:
     - name: 打包
       run: |
         set -e
-        srcDir="$GITHUB_WORKSPACE/build/src/qemu-geniezone-main"
+        srcDir="$GITHUB_WORKSPACE"
         sysrootDir="$GITHUB_WORKSPACE/build/sysroot"
         qvmDir="$GITHUB_WORKSPACE/qemu-gzvm"
         toolchain="$HOME/android-ndk-r30-beta1/toolchains/llvm/prebuilt/linux-x86_64"
