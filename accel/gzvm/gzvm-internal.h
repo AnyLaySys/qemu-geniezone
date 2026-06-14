@@ -9,6 +9,10 @@
 #include "system/gzvm_int.h"
 #include "linux-headers/linux/gzvm.h"
 
+/* gzvm-mem.c */
+#define gzvm_slots_lock(s)    qemu_mutex_lock(&(s)->slots_lock)
+#define gzvm_slots_unlock(s)  qemu_mutex_unlock(&(s)->slots_lock)
+gzvm_slot *gzvm_find_slot_by_addr_locked(GZVMState *s, uint64_t addr);
 /* gzvm-signal.c */
 void gzvm_install_sigsegv_handler(void);
 void gzvm_init_vcpu_sigsegv(void);

@@ -27,9 +27,14 @@ static MemTxAttrs gzvm_mmio_attrs(hwaddr addr)
     return (MemTxAttrs) { .secure = true };
 }
 
-static gzvm_slot *gzvm_find_slot_for_mmio(hwaddr addr, hwaddr *slot_addr_out)
+/*
+ * Caller must hold slots_lock.  On success, *slot_addr_out is set to
+ * the (possibly IPA-corrected) address and the slot pointer is returned.
+ */
+static gzvm_slot *gzvm_find_slot_for_mmio_locked(GZVMState *s, hwaddr addr,
+                                                   hwaddr *slot_addr_out)
 {
-    gzvm_slot *slot = gzvm_find_slot_by_addr(addr);
+    gzvm_slot *slot = gzvm_find_slot_by_addr_locked(s, addr);
     if (slot) {
         *slot_addr_out = addr;
         return slot;
@@ -45,7 +50,7 @@ static gzvm_slot *gzvm_find_slot_for_mmio(hwaddr addr, hwaddr *slot_addr_out)
 #if defined(GZVM_IPA_WORKAROUND)
     if ((addr >> 28) == 0x4) {
         hwaddr corrected = (addr & 0x0FFFFFFF) | 0x04000000;
-        slot = gzvm_find_slot_by_addr(corrected);
+        slot = gzvm_find_slot_by_addr_locked(s, corrected);
         if (slot) {
             *slot_addr_out = corrected;
             warn_report_once("gzvm: MMIO IPA corrected from 0x%" PRIx64 " to 0x%" PRIx64 " (bit-30/bit-26 workaround)", addr, corrected);
@@ -78,22 +83,30 @@ int gzvm_handle_mmio_exit(CPUState *cpu, struct gzvm_vcpu_run *run)
     }
 
     {
-        hwaddr slot_addr;
-        gzvm_slot *slot = gzvm_find_slot_for_mmio(addr, &slot_addr);
-        if (slot) {
-            uint64_t offset = slot_addr - slot->start;
-            if (offset < slot->size) {
-                size_t xlen = MIN((uint64_t)run->mmio.size,
-                                  slot->size - offset);
-                trace_gzvm_mmio_fallback(addr, run->mmio.size,
-                                         run->mmio.is_write);
-                if (run->mmio.is_write) {
-                    memcpy(slot->mem + offset, run->mmio.data, xlen);
-                } else {
-                    memcpy(run->mmio.data, slot->mem + offset, xlen);
+        AccelState *accel = current_accel();
+        GZVMState *s = accel ? GZVM_STATE(accel) : NULL;
+        if (s) {
+            gzvm_slots_lock(s);
+            hwaddr slot_addr;
+            gzvm_slot *slot = gzvm_find_slot_for_mmio_locked(s, addr,
+                                                              &slot_addr);
+            if (slot) {
+                uint64_t offset = slot_addr - slot->start;
+                if (offset < slot->size) {
+                    size_t xlen = MIN((uint64_t)run->mmio.size,
+                                      slot->size - offset);
+                    trace_gzvm_mmio_fallback(addr, run->mmio.size,
+                                             run->mmio.is_write);
+                    if (run->mmio.is_write) {
+                        memcpy(slot->mem + offset, run->mmio.data, xlen);
+                    } else {
+                        memcpy(run->mmio.data, slot->mem + offset, xlen);
+                    }
+                    gzvm_slots_unlock(s);
+                    return 0;
                 }
-                return 0;
             }
+            gzvm_slots_unlock(s);
         }
     }
 

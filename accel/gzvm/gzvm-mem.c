@@ -11,9 +11,6 @@
 #include "gzvm-internal.h"
 #include "trace.h"
 
-#define gzvm_slots_lock(s)    qemu_mutex_lock(&(s)->slots_lock)
-#define gzvm_slots_unlock(s)  qemu_mutex_unlock(&(s)->slots_lock)
-
 static void gzvm_assert_mutex_locked(QemuMutex *m)
 {
     int ret = pthread_mutex_trylock(&m->lock);
@@ -72,20 +69,11 @@ static gzvm_slot *gzvm_find_overlap_slot(GZVMState *s, uint64_t start, uint64_t 
     return NULL;
 }
 
-gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
+gzvm_slot *gzvm_find_slot_by_addr_locked(GZVMState *s, uint64_t addr)
 {
-    AccelState *accel = current_accel();
-    GZVMState *s;
-
-    if (!accel) {
-        return NULL;
-    }
-    s = GZVM_STATE(accel);
-
-    gzvm_slots_lock(s);
+    gzvm_assert_mutex_locked(&s->slots_lock);
 
     if (!s->nr_active_slots) {
-        gzvm_slots_unlock(s);
         return NULL;
     }
 
@@ -98,12 +86,26 @@ gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
         } else if (addr - slot->start >= slot->size) {
             lo = mid + 1;
         } else {
-            gzvm_slots_unlock(s);
             return slot;
         }
     }
-    gzvm_slots_unlock(s);
     return NULL;
+}
+
+gzvm_slot *gzvm_find_slot_by_addr(uint64_t addr)
+{
+    AccelState *accel = current_accel();
+    GZVMState *s;
+
+    if (!accel) {
+        return NULL;
+    }
+    s = GZVM_STATE(accel);
+
+    gzvm_slots_lock(s);
+    gzvm_slot *slot = gzvm_find_slot_by_addr_locked(s, addr);
+    gzvm_slots_unlock(s);
+    return slot;
 }
 
 static gzvm_slot *gzvm_get_free_slot(GZVMState *s)
@@ -371,7 +373,12 @@ static void gzvm_set_phys_mem(GZVMState *s, MemoryRegionSection *section, bool a
         int fw_ret = gzvm_set_phys_mem_fw_split(s, section,
                                                  section_start, section_size,
                                                  flags);
-        if (fw_ret) {
+        if (fw_ret < 0) {
+            gzvm_remove_overlap_slots_locked(s, section_start, section_size);
+            gzvm_slots_unlock(s);
+            return;
+        }
+        if (fw_ret > 0) {
             gzvm_slots_unlock(s);
             return;
         }
@@ -494,7 +501,9 @@ static int gzvm_create_vgic_devices(GZVMState *s)
                                   &s->gic_dist_base, "VGIC_DIST");
     if (ret) {
         close(s->vmfd);
+        s->vmfd = -1;
         close(s->fd);
+        s->fd = -1;
         return -1;
     }
     trace_gzvm_vgic_dist_created(s->gic_dist_base);
@@ -504,7 +513,9 @@ static int gzvm_create_vgic_devices(GZVMState *s)
                                   &s->gic_redist_base, "VGIC_REDIST");
     if (ret) {
         close(s->vmfd);
+        s->vmfd = -1;
         close(s->fd);
+        s->fd = -1;
         return -1;
     }
     trace_gzvm_vgic_redist_created(s->gic_redist_base);
