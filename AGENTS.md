@@ -88,8 +88,9 @@ CodeGraph 提供了 8 个 MCP 工具，按使用频率排列：
 ### 构建
 
 ```bash
-./make.sh              # debug 构建
-./make.sh --release    # release
+./make.sh              # 默认 release 构建
+./make.sh --debug      # debug 构建
+./make.sh --asan       # AddressSanitizer 构建
 ./make.sh --clean      # 重新构建
 ```
 

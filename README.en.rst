@@ -82,7 +82,7 @@ directly:
 
 .. code-block:: shell
 
-  ./build/qemu-system-aarch64 -M virt -accel gzvm -cpu host -m 4G -kernel /root/gzvm/kernel -append "root=/dev/vda2 rw console=ttyAMA0" -drive if=none,id=hd,file=/root/gzvm/Manjaro.img,format=raw -device virtio-blk-pci,drive=hd -netdev user,id=net0 -device virtio-net-pci,netdev=net0 -device virtio-gpu-pci -nographic
+  ./qemu-system-aarch64 -M virt -accel gzvm -cpu host -m 4G -kernel ./kernel -append "root=/dev/vda2 rw console=ttyAMA0" -drive if=none,id=hd,file=./disk.img,format=raw -device virtio-blk-pci,drive=hd -netdev user,id=net0 -device virtio-net-pci,netdev=net0 -device virtio-gpu-pci -nographic
 
 For protected VM mode, use:
 
