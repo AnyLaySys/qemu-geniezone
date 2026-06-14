@@ -25,6 +25,9 @@ gzvm_idle_cap_enabled(void) ""
 gzvm_idle_cap_not_supported(int ret) "ret=%d"
 gzvm_set_dtb_config(uint64_t addr, uint64_t size) "addr=0x%"PRIx64" size=0x%"PRIx64
 
+# gzvm.c
+gzvm_exit_ipi(int cpu_index) "VCPU%d IPI exit"
+
 # gzvm-mmio.c
 gzvm_handle_system_event(uint32_t type) "system_event=%u"
 gzvm_mmio_fallback(uint64_t addr, uint64_t size, int is_write) "addr=0x%"PRIx64" size=%"PRIu64" write=%d"

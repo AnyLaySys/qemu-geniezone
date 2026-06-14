@@ -7,6 +7,7 @@
 #include "hw/pci/pci.h"
 #include "qemu/error-report.h"
 #include "system/gzvm.h"
+#include "system/gzvm_int.h"
 #include "system/system.h"
 
 void virt_gzvm_init(VirtMachineState *vms)
@@ -42,7 +43,7 @@ void virt_gzvm_post_dtb(VirtMachineState *vms, hwaddr dtb_start, int dtb_size,
     gzvm_arm_set_dtb(dtb_start, dtb_size);
     dtb_data = rom_ptr_for_as(as, dtb_start, dtb_size);
     if (dtb_data) {
-        dtb_copy = g_try_memdup2(dtb_data, dtb_size);
+        dtb_copy = g_memdup2(dtb_data, dtb_size);
         if (!dtb_copy) {
             error_report("GZVM: failed to allocate memory for DTB copy");
             return;
@@ -70,9 +71,14 @@ void virt_gzvm_set_bootinfo(VirtMachineState *vms, bool firmware_loaded)
     }
 
     vms->bootinfo.entry = vms->memmap[VIRT_MEM].base;
-    /*
-     * DTB must live above the firmware/BLOS region (0–4 MiB on virt).
-     * 4 MiB is the first safe offset after the typical firmware flash.
-     */
-    vms->bootinfo.dtb_start = vms->memmap[VIRT_MEM].base + 4 * MiB;
+
+    AccelState *accel = current_accel();
+    GZVMState *s = accel ? GZVM_STATE(accel) : NULL;
+    if (s && s->firmware_size) {
+        /* Place DTB immediately after the firmware blob */
+        vms->bootinfo.dtb_start = s->firmware_start + s->firmware_size;
+    } else {
+        /* Fallback: assume 4 MiB is enough (firmware is capped at 4 MiB) */
+        vms->bootinfo.dtb_start = vms->memmap[VIRT_MEM].base + 4 * MiB;
+    }
 }

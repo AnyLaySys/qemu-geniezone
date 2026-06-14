@@ -81,6 +81,10 @@ static int gzvm_cpu_exec(CPUState *cpu)
     case GZVM_EXIT_GZ:
         return EXCP_INTERRUPT;
     case GZVM_EXIT_IPI:
+        /* IPIs between vCPUs of the same VM are handled by the
+         * in-kernel VGIC.  This exit is informational; re-enter
+         * the guest to pick up any pending interrupts. */
+        trace_gzvm_exit_ipi(cpu->cpu_index);
         return EXCP_INTERRUPT;
     case GZVM_EXIT_DEBUG:
         return EXCP_DEBUG;
@@ -98,6 +102,12 @@ static int gzvm_cpu_exec(CPUState *cpu)
                      (uint64_t)run->exception.fault_gpa);
         return -1;
     case 0:
+        /* exit_reason == 0 means the vCPU hasn't actually run yet
+         * (kernel initialises it on the stack).  If this persists,
+         * the hypervisor SMC call may have failed silently.
+         */
+        warn_report_once("gzvm: VCPU%u exit_reason=0 (vCPU may not have run)",
+                         cpu->cpu_index);
         return 0;
     default:
         return gzvm_handle_unknown_exit(cpu, run);
